@@ -1,0 +1,42 @@
+package org.detector.qweovodetect.stats.model;
+
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "sni_logs", indexes = {
+        @Index(name = "idx_sni_host", columnList = "sniHost"),
+        @Index(name = "idx_sni_time", columnList = "detectTime")
+})
+public class SniLog {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String clientIp;
+
+    @Column(nullable = false)
+    private String sniHost;
+
+    @Column(nullable = false)
+    private LocalDateTime detectTime;
+
+    public SniLog() {}
+
+    public SniLog(String clientIp, String sniHost) {
+        this.clientIp = clientIp;
+        this.sniHost = sniHost;
+        this.detectTime = LocalDateTime.now();
+    }
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public String getClientIp() { return clientIp; }
+    public void setClientIp(String clientIp) { this.clientIp = clientIp; }
+    public String getSniHost() { return sniHost; }
+    public void setSniHost(String sniHost) { this.sniHost = sniHost; }
+    public LocalDateTime getDetectTime() { return detectTime; }
+    public void setDetectTime(LocalDateTime detectTime) { this.detectTime = detectTime; }
+}
