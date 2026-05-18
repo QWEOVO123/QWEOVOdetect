@@ -1,8 +1,8 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes: [
     {
       path: '/login',
@@ -14,20 +14,28 @@ const router = createRouter({
       name: 'Dashboard',
       component: () => import('../views/Dashboard.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/'
     }
   ]
 })
 
-// 导航守卫：没登录就跳登录页
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore()
+
   if (to.meta.requiresAuth && !authStore.isLoggedIn()) {
     next('/login')
-  } else if (to.path === '/login' && authStore.isLoggedIn()) {
-    next('/')
-  } else {
-    next()
+    return
   }
+
+  if (to.path === '/login' && authStore.isLoggedIn()) {
+    next('/')
+    return
+  }
+
+  next()
 })
 
 export default router

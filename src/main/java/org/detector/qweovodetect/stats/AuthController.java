@@ -17,7 +17,7 @@ public class AuthController {
     private static final String ADMIN_USERNAME = "admin";
     //密码哈希值
     private static final String ADMIN_PASSWORD_HASH =
-            "$2a$10$Mz8nPH5xg0NpwAnX7Sdy1u2DjVDSr6Zm9Fjbaz6v.fyvjE50baqPm";
+            "$2a$10$v26ft/4RGG8/iqluQG5ireg1Ig5vLl3zw4BioX0w0pFWZNj3rWGAa";
 
     public AuthController(JwtUtil jwtUtil, PasswordEncoder passwordEncoder) {
         this.jwtUtil = jwtUtil;
