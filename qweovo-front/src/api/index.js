@@ -5,7 +5,6 @@ const api = axios.create({
   baseURL: '/api'
 })
 
-// 请求拦截器：自动带上 Token
 api.interceptors.request.use(config => {
   const authStore = useAuthStore()
   if (authStore.token) {
@@ -14,15 +13,18 @@ api.interceptors.request.use(config => {
   return config
 })
 
-// 响应拦截器：Token 过期跳登录
 api.interceptors.response.use(
   response => response,
   error => {
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    const status = error.response?.status
+    const url = error.config?.url || ''
+
+    if ((status === 401 || status === 403) && !url.includes('/auth/login')) {
       const authStore = useAuthStore()
       authStore.logout()
-      window.location.href = '/login'
+      window.location.href = '/#/login'
     }
+
     return Promise.reject(error)
   }
 )
