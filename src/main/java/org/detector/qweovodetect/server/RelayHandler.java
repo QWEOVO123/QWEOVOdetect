@@ -3,9 +3,9 @@ package org.detector.qweovodetect.server;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
 import io.netty.handler.timeout.IdleStateEvent;
-import org.detector.qweovodetect.dpi.DpiEngineAsync;
 import org.detector.qweovodetect.dpi.DpiEngine;
 import org.detector.qweovodetect.dpi.TrojanDpiEngineAsync;
+import io.netty.channel.socket.SocketChannel;
 
 public class RelayHandler extends ChannelInboundHandlerAdapter {
 
@@ -43,7 +43,10 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
             // ⭐ DPI 仅客户端方向
             TrojanDpiEngineAsync.inspect(buf, clientIp, listenPort, targetIp, chanId, direction);
             if (direction == 0) {
-                DpiEngineAsync.inspect(buf, clientIp, listenPort, targetIp, chanId);
+                if (DpiEngine.inspectAndShouldBlock(buf, clientIp, listenPort, targetIp, chanId, direction)) {
+                    closeBothWithRst(ctx.channel(), relayTarget);
+                    return;
+                }
             }
 
             // ⭐ 只 write，不 flush
@@ -119,6 +122,21 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
         }
         if (second != null && second.isOpen()) {
             second.close();
+        }
+    }
+
+    private static void closeBothWithRst(Channel first, Channel second) {
+        enableRstOnClose(first);
+        enableRstOnClose(second);
+        closeBoth(first, second);
+    }
+
+    private static void enableRstOnClose(Channel channel) {
+        if (channel instanceof SocketChannel socketChannel) {
+            try {
+                socketChannel.config().setSoLinger(0);
+            } catch (Exception ignored) {
+            }
         }
     }
 }

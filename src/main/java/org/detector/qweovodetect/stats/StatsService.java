@@ -45,20 +45,24 @@ public class StatsService {
     }
 
     public void saveSni(String clientIp, int listenPort, String sniHost) {
-        sniLogRepository.save(new SniLog(clientIp, listenPort, sniHost));
+        saveSni(clientIp, listenPort, sniHost, "TLS");
+    }
+
+    public void saveSni(String clientIp, int listenPort, String sniHost, String protocol) {
+        sniLogRepository.save(new SniLog(clientIp, listenPort, sniHost, protocol));
     }
 
     public List<Map<String, Object>> getTopSites() {
         return sniLogRepository.findTopSites().stream()
                 .limit(30)
-                .map(row -> mapOf("domain", row[0], "count", row[1]))
+                .map(row -> mapOf("domain", row[0], "protocol", row[1], "count", row[2]))
                 .toList();
     }
 
     public List<Map<String, Object>> getTopSitesLastHours(int hours) {
         return sniLogRepository.findTopSitesSince(LocalDateTime.now().minusHours(hours)).stream()
                 .limit(30)
-                .map(row -> mapOf("domain", row[0], "count", row[1]))
+                .map(row -> mapOf("domain", row[0], "protocol", row[1], "count", row[2]))
                 .toList();
     }
 
@@ -74,9 +78,9 @@ public class StatsService {
             Map<String, Object> client = new LinkedHashMap<>();
             client.put("listenPort", listenPort);
             client.put("ip", ip);
-            client.put("totalRequests", topDomains.stream().mapToLong(domain -> ((Number) domain[1]).longValue()).sum());
+            client.put("totalRequests", topDomains.stream().mapToLong(domain -> ((Number) domain[2]).longValue()).sum());
             client.put("topDomains", topDomains.stream().limit(20).map(domain ->
-                    mapOf("domain", domain[0], "count", domain[1])
+                    mapOf("domain", domain[0], "protocol", domain[1], "count", domain[2])
             ).toList());
             return client;
         }).toList();
@@ -213,7 +217,7 @@ public class StatsService {
             int port = ((Number) row[0]).intValue();
             domainsByPort.computeIfAbsent(port, ignored -> new ArrayList<>());
             if (domainsByPort.get(port).size() < 5) {
-                domainsByPort.get(port).add(mapOf("domain", row[1], "count", row[2]));
+                domainsByPort.get(port).add(mapOf("domain", row[1], "protocol", row[2], "count", row[3]));
             }
         }
         domainsByPort.forEach((port, domains) -> ports.computeIfAbsent(port, ignored -> new LinkedHashMap<>())

@@ -17,6 +17,16 @@ export const useAuthStore = defineStore('auth', () => {
     setSession(res.data.token, res.data.username)
   }
 
+  async function setupStatus() {
+    const res = await api.get('/setup/status')
+    return res.data
+  }
+
+  async function saveDatabaseSetup(form) {
+    const res = await api.post('/setup/database', form)
+    return res.data
+  }
+
   function setSession(nextToken, nextUsername) {
     token.value = nextToken
     username.value = nextUsername
@@ -41,5 +51,15 @@ export const useAuthStore = defineStore('auth', () => {
   // 是否已登录
   const isLoggedIn = () => !!token.value
 
-  return { token, username, login, changeCredentials, refreshMe, logout, isLoggedIn }
+  return {
+    token,
+    username,
+    login,
+    changeCredentials,
+    setupStatus,
+    saveDatabaseSetup,
+    refreshMe,
+    logout,
+    isLoggedIn
+  }
 })

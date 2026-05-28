@@ -22,8 +22,25 @@ const router = createRouter({
   ]
 })
 
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+  let firstStartup = false
+
+  try {
+    const setup = await authStore.setupStatus()
+    firstStartup = Boolean(setup.firstStartup)
+  } catch (e) {
+    firstStartup = false
+  }
+
+  if (firstStartup) {
+    if (to.path !== '/login') {
+      next('/login')
+      return
+    }
+    next()
+    return
+  }
 
   if (to.meta.requiresAuth && !authStore.isLoggedIn()) {
     next('/login')

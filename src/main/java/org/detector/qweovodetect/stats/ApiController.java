@@ -1,6 +1,9 @@
 package org.detector.qweovodetect.stats;
 
 import org.detector.qweovodetect.stats.model.SniLog;
+import org.detector.qweovodetect.stats.model.BlockRule;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -11,9 +14,11 @@ import java.util.Map;
 public class ApiController {
 
     private final StatsService statsService;
+    private final BlockRuleService blockRuleService;
 
-    public ApiController(StatsService statsService) {
+    public ApiController(StatsService statsService, BlockRuleService blockRuleService) {
         this.statsService = statsService;
+        this.blockRuleService = blockRuleService;
     }
 
     // 域名排行
@@ -64,5 +69,34 @@ public class ApiController {
     @GetMapping("/trojan/total")
     public Map<String, Object> trojanTotal() {
         return Map.of("total", statsService.getTrojanTotal());
+    }
+
+    @GetMapping("/block-rules")
+    public List<BlockRule> blockRules() {
+        return blockRuleService.listRules();
+    }
+
+    @PostMapping("/block-rules")
+    public BlockRule addBlockRule(@RequestBody Map<String, String> body) {
+        try {
+            return blockRuleService.addRule(body.get("keyword"));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    @PostMapping("/block-rules/{id}/enabled")
+    public BlockRule setBlockRuleEnabled(@PathVariable Long id, @RequestBody Map<String, Boolean> body) {
+        try {
+            return blockRuleService.setEnabled(id, Boolean.TRUE.equals(body.get("enabled")));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/block-rules/{id}")
+    public Map<String, Object> deleteBlockRule(@PathVariable Long id) {
+        blockRuleService.deleteRule(id);
+        return Map.of("ok", true);
     }
 }

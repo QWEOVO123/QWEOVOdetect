@@ -13,6 +13,7 @@
         <span class="status-dot"></span>
         <span class="time">{{ nowTime }}</span>
         <span class="user">{{ authStore.username }}</span>
+        <button class="secondary-btn" @click="openDatabaseDialog" title="修改数据库配置">数据库设置</button>
         <button class="secondary-btn" @click="openCredentialDialog" title="修改用户名和密码">账号设置</button>
         <button class="logout-btn" @click="handleLogout" title="退出登录">退出</button>
       </div>
@@ -60,11 +61,38 @@
               <span>高危 {{ port.riskCount }}</span>
             </div>
             <div class="port-domains" v-if="port.topDomains?.length">
-              <span v-for="domain in port.topDomains" :key="`${port.listenPort}-${domain.domain}`">
+              <span v-for="domain in port.topDomains" :key="`${port.listenPort}-${domain.protocol}-${domain.domain}`">
+                <b :class="protocolClass(domain.protocol)">{{ domain.protocol || 'TLS' }}</b>
                 {{ domain.domain }} · {{ domain.count }}
               </span>
             </div>
           </article>
+        </div>
+      </section>
+
+      <section class="panel block-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Block List</p>
+            <h3>域名关键词封禁</h3>
+          </div>
+          <span class="hint">{{ blockRules.length }} 条规则</span>
+        </div>
+        <form class="block-form" @submit.prevent="addBlockRule">
+          <input v-model="blockKeyword" placeholder="输入关键词，例如 tiktok" maxlength="128" />
+          <button class="primary-btn" :disabled="blockSaving">{{ blockSaving ? '提交中' : '提交封禁' }}</button>
+        </form>
+        <p v-if="blockError" class="form-message error-message">{{ blockError }}</p>
+        <div v-if="blockRules.length" class="block-list">
+          <span v-for="rule in blockRules" :key="rule.id" class="block-chip" :class="{ disabled: !rule.enabled }">
+            <b>{{ rule.keyword }}</b>
+            <button type="button" @click="toggleBlockRule(rule)">{{ rule.enabled ? '停用' : '启用' }}</button>
+            <button type="button" @click="deleteBlockRule(rule)">删除</button>
+          </span>
+        </div>
+        <div v-else class="empty-state compact">
+          <strong>暂无封禁关键词</strong>
+          <span>命中 HTTP Host、TLS SNI 或 QUIC SNI 后会自动阻断。</span>
         </div>
       </section>
 
@@ -99,9 +127,12 @@
                     <tr><th>#</th><th>域名</th><th>次数</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(d, i) in client.topDomains" :key="`${client.ip}-${d.domain}`">
+                    <tr v-for="(d, i) in client.topDomains" :key="`${client.listenPort}-${client.ip}-${d.protocol}-${d.domain}`">
                       <td>{{ i + 1 }}</td>
-                      <td class="domain-cell">{{ d.domain }}</td>
+                      <td class="domain-cell">
+                        <span class="sni-protocol" :class="protocolClass(d.protocol)">{{ d.protocol || 'TLS' }}</span>
+                        {{ d.domain }}
+                      </td>
                       <td class="count-cell">{{ d.count }}</td>
                     </tr>
                   </tbody>
@@ -155,9 +186,12 @@
                 <tr v-if="topSites.length === 0">
                   <td colspan="3" class="empty-td">暂无数据</td>
                 </tr>
-                <tr v-for="(s, i) in topSites" :key="s.domain">
+                <tr v-for="(s, i) in topSites" :key="`${s.protocol}-${s.domain}`">
                   <td>{{ i + 1 }}</td>
-                  <td class="domain-cell">{{ s.domain }}</td>
+                  <td class="domain-cell">
+                    <span class="sni-protocol" :class="protocolClass(s.protocol)">{{ s.protocol || 'TLS' }}</span>
+                    {{ s.domain }}
+                  </td>
                   <td class="count-cell">{{ s.count }}</td>
                 </tr>
               </tbody>
@@ -249,6 +283,72 @@
         </div>
       </section>
     </div>
+
+    <div v-if="databaseDialogOpen" class="modal-backdrop" @click.self="closeDatabaseDialog">
+      <section class="modal" aria-label="修改数据库配置">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Database</p>
+            <h3>数据库设置</h3>
+          </div>
+          <button class="icon-btn" @click="closeDatabaseDialog" aria-label="关闭">×</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="segment">
+            <button :class="{ active: databaseForm.type === 'H2' }" @click="databaseForm.type = 'H2'">H2</button>
+            <button :class="{ active: databaseForm.type === 'MYSQL' }" @click="databaseForm.type = 'MYSQL'">MySQL</button>
+          </div>
+
+          <label class="field">
+            <span>当前用户名</span>
+            <input v-model="databaseForm.oldUsername" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>当前密码</span>
+            <input v-model="databaseForm.oldPassword" type="password" autocomplete="current-password" />
+          </label>
+
+          <label v-if="databaseForm.type === 'H2'" class="field">
+            <span>H2 数据路径</span>
+            <input v-model="databaseForm.path" placeholder="./data/socks5_stats" />
+          </label>
+
+          <template v-else>
+            <label class="field">
+              <span>MySQL 地址</span>
+              <input v-model="databaseForm.host" placeholder="127.0.0.1" />
+            </label>
+            <label class="field">
+              <span>MySQL 端口</span>
+              <input v-model.number="databaseForm.port" type="number" min="1" max="65535" />
+            </label>
+            <label class="field">
+              <span>数据库名</span>
+              <input v-model="databaseForm.databaseName" placeholder="qweovo_detect" />
+            </label>
+            <label class="field">
+              <span>MySQL 用户名</span>
+              <input v-model="databaseForm.username" autocomplete="username" />
+            </label>
+            <label class="field">
+              <span>MySQL 密码</span>
+              <input v-model="databaseForm.password" type="password" autocomplete="current-password" />
+            </label>
+          </template>
+
+          <p v-if="databaseError" class="form-message error-message">{{ databaseError }}</p>
+          <p v-if="databaseSuccess" class="form-message success-message">{{ databaseSuccess }}</p>
+        </div>
+
+        <div class="modal-actions">
+          <button class="secondary-btn" @click="closeDatabaseDialog">取消</button>
+          <button class="primary-btn" :disabled="databaseSaving" @click="submitDatabase">
+            {{ databaseSaving ? '保存中' : '保存配置' }}
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -272,17 +372,36 @@ const topSites = ref([])
 const ssRanking = ref([])
 const highRisk = ref([])
 const portSummary = ref([])
+const blockRules = ref([])
+const blockKeyword = ref('')
+const blockSaving = ref(false)
+const blockError = ref('')
 const nowTime = ref('')
 const credentialDialogOpen = ref(false)
 const credentialSaving = ref(false)
 const credentialError = ref('')
 const credentialSuccess = ref('')
+const databaseDialogOpen = ref(false)
+const databaseSaving = ref(false)
+const databaseError = ref('')
+const databaseSuccess = ref('')
 const credentialForm = ref({
   oldUsername: '',
   oldPassword: '',
   newUsername: '',
   newPassword: '',
   confirmPassword: ''
+})
+const databaseForm = ref({
+  oldUsername: '',
+  oldPassword: '',
+  type: 'H2',
+  path: './data/socks5_stats',
+  host: '127.0.0.1',
+  port: 3306,
+  databaseName: '',
+  username: '',
+  password: ''
 })
 let timer = null
 
@@ -322,9 +441,13 @@ function hasPortTraffic(port) {
     || Number(port.trojanTotal || 0) > 0
 }
 
+function protocolClass(protocol) {
+  return String(protocol || 'TLS').toLowerCase() === 'quic' ? 'protocol-quic' : 'protocol-tls'
+}
+
 async function loadData() {
   try {
-    const [totalRes, sitesRes, clientsRes, ssTotalRes, trojanTotalRes, ssRankRes, ssRiskRes, portsRes] = await Promise.all([
+    const [totalRes, sitesRes, clientsRes, ssTotalRes, trojanTotalRes, ssRankRes, ssRiskRes, portsRes, blockRulesRes] = await Promise.all([
       api.get('/total'),
       api.get('/top-sites', { params: { hours: 24 } }),
       api.get('/all-clients'),
@@ -332,7 +455,8 @@ async function loadData() {
       api.get('/trojan/total'),
       api.get('/ss/client-ranking'),
       api.get('/ss/high-risk'),
-      api.get('/ports/summary')
+      api.get('/ports/summary'),
+      api.get('/block-rules')
     ])
 
     total.value = totalRes.data.total
@@ -346,9 +470,45 @@ async function loadData() {
     highRisk.value = ssRiskRes.data
     riskCount.value = ssRiskRes.data.length
     portSummary.value = portsRes.data
+    blockRules.value = blockRulesRes.data
   } catch (e) {
     console.error('数据加载失败', e)
   }
+}
+
+async function loadBlockRules() {
+  const res = await api.get('/block-rules')
+  blockRules.value = res.data
+}
+
+async function addBlockRule() {
+  blockError.value = ''
+  const keyword = blockKeyword.value.trim()
+  if (!keyword) {
+    blockError.value = '请输入封禁关键词'
+    return
+  }
+
+  blockSaving.value = true
+  try {
+    await api.post('/block-rules', { keyword })
+    blockKeyword.value = ''
+    await loadBlockRules()
+  } catch (e) {
+    blockError.value = e.response?.data?.message || '封禁规则提交失败'
+  } finally {
+    blockSaving.value = false
+  }
+}
+
+async function toggleBlockRule(rule) {
+  await api.post(`/block-rules/${rule.id}/enabled`, { enabled: !rule.enabled })
+  await loadBlockRules()
+}
+
+async function deleteBlockRule(rule) {
+  await api.delete(`/block-rules/${rule.id}`)
+  await loadBlockRules()
 }
 
 function handleLogout() {
@@ -372,6 +532,90 @@ function openCredentialDialog() {
 function closeCredentialDialog() {
   if (credentialSaving.value) return
   credentialDialogOpen.value = false
+}
+
+async function openDatabaseDialog() {
+  databaseDialogOpen.value = true
+  databaseError.value = ''
+  databaseSuccess.value = ''
+  databaseForm.value.oldUsername = authStore.username || ''
+  databaseForm.value.oldPassword = ''
+  try {
+    const status = await authStore.setupStatus()
+    applyDatabase(status.database)
+  } catch (e) {
+    databaseError.value = '读取数据库配置失败'
+  }
+}
+
+function closeDatabaseDialog() {
+  if (databaseSaving.value) return
+  databaseDialogOpen.value = false
+}
+
+function applyDatabase(database) {
+  if (!database) return
+  databaseForm.value = {
+    ...databaseForm.value,
+    type: database.type || 'H2',
+    path: database.path || './data/socks5_stats',
+    host: database.host || '127.0.0.1',
+    port: database.port || 3306,
+    databaseName: database.databaseName || '',
+    username: database.username || '',
+    password: ''
+  }
+}
+
+async function submitDatabase() {
+  databaseError.value = ''
+  databaseSuccess.value = ''
+
+  const form = databaseForm.value
+  if (!form.oldUsername || !form.oldPassword) {
+    databaseError.value = '请填写当前用户名和当前密码'
+    return
+  }
+  if (form.type === 'MYSQL' && (!form.databaseName || !form.username)) {
+    databaseError.value = '请填写 MySQL 数据库名和用户名'
+    return
+  }
+
+  databaseSaving.value = true
+  try {
+    const result = await authStore.saveDatabaseSetup({
+      oldUsername: form.oldUsername,
+      oldPassword: form.oldPassword,
+      database: databasePayload()
+    })
+    databaseSuccess.value = result.requiresRestart
+      ? '数据库配置已保存，请重启后端服务生效。'
+      : '数据库配置已保存。'
+    databaseForm.value.oldPassword = ''
+    databaseForm.value.password = ''
+  } catch (e) {
+    databaseError.value = e.response?.data?.error || '保存数据库配置失败'
+  } finally {
+    databaseSaving.value = false
+  }
+}
+
+function databasePayload() {
+  if (databaseForm.value.type === 'H2') {
+    return {
+      type: 'H2',
+      path: databaseForm.value.path
+    }
+  }
+
+  return {
+    type: 'MYSQL',
+    host: databaseForm.value.host,
+    port: Number(databaseForm.value.port || 3306),
+    databaseName: databaseForm.value.databaseName,
+    username: databaseForm.value.username,
+    password: databaseForm.value.password
+  }
 }
 
 async function submitCredentials() {
@@ -648,6 +892,64 @@ onUnmounted(() => {
   margin-bottom: 18px;
 }
 
+.block-panel {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+}
+
+.block-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 0 16px 12px;
+}
+
+.block-form input {
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #cfddd8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #18332d;
+  font-weight: 750;
+}
+
+.block-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 16px;
+}
+
+.block-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 7px 5px 11px;
+  border: 1px solid rgba(190, 18, 60, 0.18);
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+.block-chip.disabled {
+  border-color: #d9e5e0;
+  background: #f4f8f6;
+  color: #72867f;
+}
+
+.block-chip button {
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.8);
+  color: inherit;
+  cursor: pointer;
+  font-weight: 800;
+}
+
 .port-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -720,6 +1022,28 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.port-domains b,
+.sni-protocol {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  margin-right: 7px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.protocol-tls {
+  background: #e3f2ff;
+  color: #0369a1;
+}
+
+.protocol-quic {
+  background: #eee7ff;
+  color: #6d28d9;
+}
+
 .panel {
   min-width: 0;
   border: 1px solid rgba(31, 62, 55, 0.1);
@@ -768,6 +1092,13 @@ onUnmounted(() => {
 .empty-state strong {
   color: #29433d;
   font-size: 16px;
+}
+
+.empty-state.compact {
+  margin: 0 16px;
+  padding: 16px;
+  border: 1px dashed #cfddd8;
+  border-radius: 8px;
 }
 
 .client-list {
@@ -988,6 +1319,31 @@ th {
   box-shadow: 0 0 0 4px rgba(31, 159, 131, 0.12);
 }
 
+.segment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #edf5f2;
+}
+
+.segment button {
+  height: 38px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #47625b;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.segment button.active {
+  background: #ffffff;
+  color: #15352f;
+  box-shadow: 0 8px 20px rgba(24, 44, 38, 0.08);
+}
+
 .form-message {
   padding: 10px 12px;
   border-radius: 8px;
@@ -1050,6 +1406,10 @@ th {
 
   .metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .block-form {
+    grid-template-columns: 1fr;
   }
 
   .metric-card {
