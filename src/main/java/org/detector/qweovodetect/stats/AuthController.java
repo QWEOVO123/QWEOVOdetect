@@ -14,10 +14,10 @@ public class AuthController {
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     //账号
-    private static final String ADMIN_USERNAME = "bx20061015";
+    private static final String ADMIN_USERNAME = "admin";
     //密码哈希值
     private static final String ADMIN_PASSWORD_HASH =
-            "$2a$10$eJq5T8Y8OPx0mPApSpNWt.PtzOLJ6krj1zsiP/y9ievN/RhvxdGli";
+            "$2a$10$NUfWYOc77Ulqo4wXjOq/Nuzs1C72CJ29NOgD9K5UUAZlaVjSxcYFi";
 
     public AuthController(JwtUtil jwtUtil, PasswordEncoder passwordEncoder) {
         this.jwtUtil = jwtUtil;
