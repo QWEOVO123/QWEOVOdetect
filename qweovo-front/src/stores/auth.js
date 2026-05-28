@@ -9,9 +9,24 @@ export const useAuthStore = defineStore('auth', () => {
   // 登录
   async function login(form) {
     const res = await api.post('/auth/login', form)
-    token.value = res.data.token
+    setSession(res.data.token, res.data.username)
+  }
+
+  async function changeCredentials(form) {
+    const res = await api.post('/auth/credentials', form)
+    setSession(res.data.token, res.data.username)
+  }
+
+  function setSession(nextToken, nextUsername) {
+    token.value = nextToken
+    username.value = nextUsername
+    localStorage.setItem('token', nextToken)
+    localStorage.setItem('username', nextUsername)
+  }
+
+  async function refreshMe() {
+    const res = await api.get('/auth/me')
     username.value = res.data.username
-    localStorage.setItem('token', res.data.token)
     localStorage.setItem('username', res.data.username)
   }
 
@@ -26,5 +41,5 @@ export const useAuthStore = defineStore('auth', () => {
   // 是否已登录
   const isLoggedIn = () => !!token.value
 
-  return { token, username, login, logout, isLoggedIn }
+  return { token, username, login, changeCredentials, refreshMe, logout, isLoggedIn }
 })

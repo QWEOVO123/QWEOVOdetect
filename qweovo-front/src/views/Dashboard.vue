@@ -13,6 +13,7 @@
         <span class="status-dot"></span>
         <span class="time">{{ nowTime }}</span>
         <span class="user">{{ authStore.username }}</span>
+        <button class="secondary-btn" @click="openCredentialDialog" title="修改用户名和密码">账号设置</button>
         <button class="logout-btn" @click="handleLogout" title="退出登录">退出</button>
       </div>
     </header>
@@ -203,6 +204,51 @@
         </article>
       </section>
     </main>
+
+    <div v-if="credentialDialogOpen" class="modal-backdrop" @click.self="closeCredentialDialog">
+      <section class="modal" aria-label="修改用户名和密码">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Account</p>
+            <h3>修改登录信息</h3>
+          </div>
+          <button class="icon-btn" @click="closeCredentialDialog" aria-label="关闭">×</button>
+        </div>
+
+        <div class="modal-body">
+          <label class="field">
+            <span>原用户名</span>
+            <input v-model="credentialForm.oldUsername" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>原密码</span>
+            <input v-model="credentialForm.oldPassword" type="password" autocomplete="current-password" />
+          </label>
+          <label class="field">
+            <span>新用户名</span>
+            <input v-model="credentialForm.newUsername" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>新密码</span>
+            <input v-model="credentialForm.newPassword" type="password" autocomplete="new-password" />
+          </label>
+          <label class="field">
+            <span>确认新密码</span>
+            <input v-model="credentialForm.confirmPassword" type="password" autocomplete="new-password" @keyup.enter="submitCredentials" />
+          </label>
+
+          <p v-if="credentialError" class="form-message error-message">{{ credentialError }}</p>
+          <p v-if="credentialSuccess" class="form-message success-message">{{ credentialSuccess }}</p>
+        </div>
+
+        <div class="modal-actions">
+          <button class="secondary-btn" @click="closeCredentialDialog">取消</button>
+          <button class="primary-btn" :disabled="credentialSaving" @click="submitCredentials">
+            {{ credentialSaving ? '保存中' : '保存修改' }}
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -227,6 +273,17 @@ const ssRanking = ref([])
 const highRisk = ref([])
 const portSummary = ref([])
 const nowTime = ref('')
+const credentialDialogOpen = ref(false)
+const credentialSaving = ref(false)
+const credentialError = ref('')
+const credentialSuccess = ref('')
+const credentialForm = ref({
+  oldUsername: '',
+  oldPassword: '',
+  newUsername: '',
+  newPassword: '',
+  confirmPassword: ''
+})
 let timer = null
 
 const avatarList = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
@@ -297,6 +354,61 @@ async function loadData() {
 function handleLogout() {
   authStore.logout()
   router.push('/login')
+}
+
+function openCredentialDialog() {
+  credentialDialogOpen.value = true
+  credentialError.value = ''
+  credentialSuccess.value = ''
+  credentialForm.value = {
+    oldUsername: authStore.username || '',
+    oldPassword: '',
+    newUsername: authStore.username || '',
+    newPassword: '',
+    confirmPassword: ''
+  }
+}
+
+function closeCredentialDialog() {
+  if (credentialSaving.value) return
+  credentialDialogOpen.value = false
+}
+
+async function submitCredentials() {
+  credentialError.value = ''
+  credentialSuccess.value = ''
+
+  const form = credentialForm.value
+  if (!form.oldUsername || !form.oldPassword || !form.newUsername || !form.newPassword) {
+    credentialError.value = '请完整填写原用户名、原密码、新用户名和新密码'
+    return
+  }
+  if (form.newPassword !== form.confirmPassword) {
+    credentialError.value = '两次输入的新密码不一致'
+    return
+  }
+
+  credentialSaving.value = true
+  try {
+    await authStore.changeCredentials({
+      oldUsername: form.oldUsername,
+      oldPassword: form.oldPassword,
+      newUsername: form.newUsername,
+      newPassword: form.newPassword
+    })
+    credentialSuccess.value = '登录信息已更新'
+    credentialForm.value.oldPassword = ''
+    credentialForm.value.newPassword = ''
+    credentialForm.value.confirmPassword = ''
+    setTimeout(() => {
+      credentialDialogOpen.value = false
+      credentialSuccess.value = ''
+    }, 800)
+  } catch (e) {
+    credentialError.value = e.response?.data?.error || '修改失败，请检查原用户名和原密码'
+  } finally {
+    credentialSaving.value = false
+  }
 }
 
 function updateTime() {
@@ -409,6 +521,43 @@ onUnmounted(() => {
   color: #24443d;
   cursor: pointer;
   font-weight: 750;
+}
+
+.secondary-btn,
+.primary-btn,
+.icon-btn {
+  height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.secondary-btn {
+  padding: 0 12px;
+  border: 1px solid #cfddd8;
+  background: #ffffff;
+  color: #24443d;
+}
+
+.primary-btn {
+  padding: 0 16px;
+  border: 0;
+  background: #15352f;
+  color: #ffffff;
+}
+
+.primary-btn:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.icon-btn {
+  width: 34px;
+  border: 1px solid #cfddd8;
+  background: #ffffff;
+  color: #24443d;
+  font-size: 20px;
+  line-height: 1;
 }
 
 .dashboard-main {
@@ -765,6 +914,100 @@ th {
   margin: 2px 4px 2px 0;
   background: #eef8f5;
   color: #17614f;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(12, 24, 21, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.modal {
+  width: min(460px, 100%);
+  border: 1px solid rgba(31, 62, 55, 0.14);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgba(11, 29, 24, 0.22);
+  overflow: hidden;
+}
+
+.modal-head,
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.modal-head {
+  border-bottom: 1px solid #e5eeea;
+}
+
+.modal-head h3 {
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.modal-body {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+
+.field span {
+  color: #47625b;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.field input {
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid #c9d8d3;
+  border-radius: 8px;
+  background: #fbfefd;
+  color: #17211e;
+  outline: none;
+}
+
+.field input:focus {
+  border-color: #1f9f83;
+  box-shadow: 0 0 0 4px rgba(31, 159, 131, 0.12);
+}
+
+.form-message {
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.error-message {
+  background: #fff1f0;
+  color: #b42318;
+}
+
+.success-message {
+  background: #def7ec;
+  color: #047857;
+}
+
+.modal-actions {
+  justify-content: flex-end;
+  border-top: 1px solid #e5eeea;
 }
 
 @media (max-width: 1180px) {
