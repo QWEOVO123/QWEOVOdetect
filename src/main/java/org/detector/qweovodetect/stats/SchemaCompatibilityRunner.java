@@ -20,5 +20,9 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
             jdbcTemplate.execute("ALTER TABLE risk_targets DROP CONSTRAINT IF EXISTS uk_risk_protocol_target");
         } catch (Exception ignored) {
         }
+        try {
+            jdbcTemplate.update("UPDATE sni_logs SET protocol = 'TLS' WHERE protocol IS NULL");
+        } catch (Exception ignored) {
+        }
     }
 }

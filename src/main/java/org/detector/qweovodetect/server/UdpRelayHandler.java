@@ -6,6 +6,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramPacket;
+import org.detector.qweovodetect.dpi.QuicSniDpiEngine;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -81,6 +82,11 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
         ByteBuf payload = content.retainedSlice();
         boolean submitted = false;
         try {
+            if (QuicSniDpiEngine.inspect(payload, clientIp, listenPort, target.host(), target.port())) {
+                System.out.printf("[UDP:%d] drop blocked QUIC %s -> %s:%d (%d bytes)%n",
+                        listenPort, clientIp, target.host(), target.port(), payload.readableBytes());
+                return;
+            }
             ctx.writeAndFlush(new DatagramPacket(payload, new InetSocketAddress(target.host(), target.port())));
             submitted = true;
         } finally {

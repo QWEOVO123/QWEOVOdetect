@@ -10,11 +10,73 @@
       <div class="signal-list">
         <span>TCP Relay</span>
         <span>DPI Engine</span>
-        <span>H2 Storage</span>
+        <span>{{ setupMode ? 'Database Setup' : 'H2 / MySQL' }}</span>
       </div>
     </section>
 
-    <section class="login-card" aria-label="登录">
+    <section v-if="setupMode" class="login-card setup-card" aria-label="数据库初始化">
+      <div class="card-head">
+        <p class="eyebrow">First startup</p>
+        <h2>初始化系统</h2>
+      </div>
+
+      <label class="field">
+        <span>初始用户名</span>
+        <input v-model="initialAuth.username" autocomplete="username" placeholder="请输入用户名" />
+      </label>
+
+      <label class="field">
+        <span>初始密码</span>
+        <input v-model="initialAuth.password" type="password" autocomplete="new-password" placeholder="请输入密码" />
+      </label>
+
+      <label class="field">
+        <span>确认初始密码</span>
+        <input v-model="initialAuth.confirmPassword" type="password" autocomplete="new-password" placeholder="请再次输入密码" />
+      </label>
+
+      <div class="segment">
+        <button :class="{ active: dbForm.type === 'H2' }" @click="dbForm.type = 'H2'">H2</button>
+        <button :class="{ active: dbForm.type === 'MYSQL' }" @click="dbForm.type = 'MYSQL'">MySQL</button>
+      </div>
+
+      <label v-if="dbForm.type === 'H2'" class="field">
+        <span>H2 数据路径</span>
+        <input v-model="dbForm.path" placeholder="./data/socks5_stats" />
+      </label>
+
+      <template v-else>
+        <label class="field">
+          <span>MySQL 地址</span>
+          <input v-model="dbForm.host" placeholder="127.0.0.1" />
+        </label>
+        <label class="field">
+          <span>MySQL 端口</span>
+          <input v-model.number="dbForm.port" type="number" min="1" max="65535" placeholder="3306" />
+        </label>
+        <label class="field">
+          <span>数据库名</span>
+          <input v-model="dbForm.databaseName" placeholder="qweovo_detect" />
+        </label>
+        <label class="field">
+          <span>用户名</span>
+          <input v-model="dbForm.username" autocomplete="username" />
+        </label>
+        <label class="field">
+          <span>密码</span>
+          <input v-model="dbForm.password" type="password" autocomplete="current-password" />
+        </label>
+      </template>
+
+      <button class="login-btn" @click="saveSetup" :disabled="setupSaving">
+        <span>{{ setupSaving ? '正在保存' : '保存数据库配置' }}</span>
+      </button>
+
+      <p v-if="setupMessage" class="notice" :class="{ warn: setupRequiresRestart }">{{ setupMessage }}</p>
+      <p v-if="error" class="error">{{ error }}</p>
+    </section>
+
+    <section v-else class="login-card" aria-label="登录">
       <div class="card-head">
         <p class="eyebrow">Welcome back</p>
         <h2>登录 QWEOVO</h2>
@@ -47,7 +109,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
@@ -58,6 +120,102 @@ const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref('')
+const setupMode = ref(false)
+const setupSaving = ref(false)
+const setupMessage = ref('')
+const setupRequiresRestart = ref(false)
+const initialAuth = ref({
+  username: '',
+  password: '',
+  confirmPassword: ''
+})
+const dbForm = ref({
+  type: 'H2',
+  path: './data/socks5_stats',
+  host: '127.0.0.1',
+  port: 3306,
+  databaseName: '',
+  username: '',
+  password: ''
+})
+
+onMounted(async () => {
+  try {
+    const status = await authStore.setupStatus()
+    setupMode.value = Boolean(status.firstStartup)
+    applyDatabase(status.database)
+  } catch (e) {
+    setupMode.value = false
+  }
+})
+
+function applyDatabase(database) {
+  if (!database) return
+  dbForm.value = {
+    type: database.type || 'H2',
+    path: database.path || './data/socks5_stats',
+    host: database.host || '127.0.0.1',
+    port: database.port || 3306,
+    databaseName: database.databaseName || '',
+    username: database.username || '',
+    password: ''
+  }
+}
+
+async function saveSetup() {
+  error.value = ''
+  setupMessage.value = ''
+  setupRequiresRestart.value = false
+
+  if (dbForm.value.type === 'MYSQL' && (!dbForm.value.databaseName || !dbForm.value.username)) {
+    error.value = '请填写 MySQL 数据库名和用户名'
+    return
+  }
+  if (!initialAuth.value.username || !initialAuth.value.password) {
+    error.value = '请设置初始用户名和密码'
+    return
+  }
+  if (initialAuth.value.password !== initialAuth.value.confirmPassword) {
+    error.value = '两次输入的初始密码不一致'
+    return
+  }
+
+  setupSaving.value = true
+  try {
+    const result = await authStore.saveDatabaseSetup({
+      initialUsername: initialAuth.value.username,
+      initialPassword: initialAuth.value.password,
+      database: dbPayload()
+    })
+    setupRequiresRestart.value = result.requiresRestart
+    setupMessage.value = result.requiresRestart
+      ? '数据库配置已保存，请重启后端服务后再登录。'
+      : '数据库配置已保存，可以继续登录。'
+    setupMode.value = Boolean(result.requiresRestart)
+  } catch (e) {
+    error.value = e.response?.data?.error || '保存数据库配置失败'
+  } finally {
+    setupSaving.value = false
+  }
+}
+
+function dbPayload() {
+  if (dbForm.value.type === 'H2') {
+    return {
+      type: 'H2',
+      path: dbForm.value.path
+    }
+  }
+
+  return {
+    type: 'MYSQL',
+    host: dbForm.value.host,
+    port: Number(dbForm.value.port || 3306),
+    databaseName: dbForm.value.databaseName,
+    username: dbForm.value.username,
+    password: dbForm.value.password
+  }
+}
 
 async function handleLogin() {
   if (!username.value || !password.value) {
@@ -168,6 +326,10 @@ async function handleLogin() {
   backdrop-filter: blur(18px);
 }
 
+.setup-card {
+  align-self: center;
+}
+
 .card-head {
   margin-bottom: 28px;
 }
@@ -181,6 +343,32 @@ async function handleLogin() {
   color: #17211e;
   font-size: 28px;
   font-weight: 820;
+}
+
+.segment {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #edf5f2;
+}
+
+.segment button {
+  height: 38px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #47625b;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.segment button.active {
+  background: #ffffff;
+  color: #15352f;
+  box-shadow: 0 8px 20px rgba(24, 44, 38, 0.08);
 }
 
 .field {
@@ -242,13 +430,27 @@ async function handleLogin() {
   opacity: 0.72;
 }
 
-.error {
+.error,
+.notice {
   margin-top: 16px;
   padding: 10px 12px;
   border-radius: 8px;
+  font-size: 13px;
+}
+
+.error {
   background: #fff1f0;
   color: #b42318;
-  font-size: 13px;
+}
+
+.notice {
+  background: #def7ec;
+  color: #047857;
+}
+
+.notice.warn {
+  background: #fff0cc;
+  color: #b45309;
 }
 
 @media (max-width: 860px) {

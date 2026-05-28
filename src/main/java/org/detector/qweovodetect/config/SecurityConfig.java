@@ -39,6 +39,7 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()   // 登录接口放行
+                        .requestMatchers("/api/setup/**").permitAll()
                         .requestMatchers("/api/**").authenticated()     // API 需要登录
                         .anyRequest().permitAll()                       // 页面可以公开
                 )
