@@ -2,8 +2,12 @@ package org.detector.qweovodetect.stats;
 
 import org.detector.qweovodetect.config.JwtUtil;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
@@ -12,16 +16,11 @@ import java.util.Map;
 public class AuthController {
 
     private final JwtUtil jwtUtil;
-    private final PasswordEncoder passwordEncoder;
-    //账号
-    private static final String ADMIN_USERNAME = "admin";
-    //密码哈希值
-    private static final String ADMIN_PASSWORD_HASH =
-            "$2a$10$NUfWYOc77Ulqo4wXjOq/Nuzs1C72CJ29NOgD9K5UUAZlaVjSxcYFi";
+    private final AuthConfigService authConfigService;
 
-    public AuthController(JwtUtil jwtUtil, PasswordEncoder passwordEncoder) {
+    public AuthController(JwtUtil jwtUtil, AuthConfigService authConfigService) {
         this.jwtUtil = jwtUtil;
-        this.passwordEncoder = passwordEncoder;
+        this.authConfigService = authConfigService;
     }
 
     @PostMapping("/login")
@@ -29,9 +28,7 @@ public class AuthController {
         String username = body.get("username");
         String password = body.get("password");
 
-        if (ADMIN_USERNAME.equals(username) &&
-                passwordEncoder.matches(password, ADMIN_PASSWORD_HASH)) {
-
+        if (authConfigService.matches(username, password)) {
             String token = jwtUtil.generateToken(username);
             return ResponseEntity.ok(Map.of(
                     "token", token,
@@ -39,9 +36,26 @@ public class AuthController {
             ));
         }
 
-        return ResponseEntity.status(401).body(Map.of(
-                "error", "用户名或密码错误"
-        ));
+        return ResponseEntity.status(401).body(Map.of("error", "用户名或密码错误"));
+    }
+
+    @PostMapping("/credentials")
+    public ResponseEntity<?> changeCredentials(@RequestBody Map<String, String> body) {
+        try {
+            AuthConfigService.AuthConfig config = authConfigService.changeCredentials(
+                    body.get("oldUsername"),
+                    body.get("oldPassword"),
+                    body.get("newUsername"),
+                    body.get("newPassword"));
+
+            String token = jwtUtil.generateToken(config.username());
+            return ResponseEntity.ok(Map.of(
+                    "token", token,
+                    "username", config.username()
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(400).body(Map.of("error", e.getMessage()));
+        }
     }
 
     @GetMapping("/me")
