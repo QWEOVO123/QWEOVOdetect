@@ -7,10 +7,11 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "risk_targets", indexes = {
         @Index(name = "idx_risk_protocol", columnList = "protocol"),
+        @Index(name = "idx_risk_listen_port", columnList = "listenPort"),
         @Index(name = "idx_risk_target_ip", columnList = "targetIp"),
         @Index(name = "idx_risk_last_seen", columnList = "lastSeenTime")
 }, uniqueConstraints = {
-        @UniqueConstraint(name = "uk_risk_protocol_target", columnNames = {"protocol", "targetIp"})
+        @UniqueConstraint(name = "uk_risk_protocol_port_target", columnNames = {"protocol", "listenPort", "targetIp"})
 })
 public class RiskTarget {
 
@@ -23,6 +24,9 @@ public class RiskTarget {
 
     @Column(nullable = false)
     private String targetIp;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int listenPort;
 
     @Column(nullable = false)
     private long triggerCount;
@@ -40,8 +44,13 @@ public class RiskTarget {
     }
 
     public RiskTarget(String protocol, String targetIp, long triggerCount, String riskLevel) {
+        this(protocol, 0, targetIp, triggerCount, riskLevel);
+    }
+
+    public RiskTarget(String protocol, int listenPort, String targetIp, long triggerCount, String riskLevel) {
         LocalDateTime now = LocalDateTime.now();
         this.protocol = protocol;
+        this.listenPort = listenPort;
         this.targetIp = targetIp;
         this.triggerCount = triggerCount;
         this.riskLevel = riskLevel;
@@ -63,6 +72,14 @@ public class RiskTarget {
 
     public void setProtocol(String protocol) {
         this.protocol = protocol;
+    }
+
+    public int getListenPort() {
+        return listenPort;
+    }
+
+    public void setListenPort(int listenPort) {
+        this.listenPort = listenPort;
     }
 
     public String getTargetIp() {

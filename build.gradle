@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'org.detector'
-version = '2.0.1'
+version = '2.6.0'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21
@@ -20,13 +20,13 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
-    implementation 'io.netty:netty-all:4.1.115.Final'
+    implementation 'io.netty:netty-all:4.2.5.Final'
     runtimeOnly 'com.h2database:h2'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'io.jsonwebtoken:jjwt-api:0.12.3'
-    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.3'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.6'
     runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.3'
 
 }

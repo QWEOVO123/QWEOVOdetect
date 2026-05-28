@@ -8,6 +8,8 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
 import io.netty.handler.codec.haproxy.*;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
+import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.handler.timeout.IdleStateHandler;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -15,7 +17,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class Socks5Handler extends ChannelInboundHandlerAdapter {
 
     private static final AtomicInteger idGen = new AtomicInteger(0);
+    private static final int HANDSHAKE_IDLE_TIMEOUT_SECONDS = 60;
+    public static final String HANDSHAKE_IDLE_HANDLER = "handshakeIdle";
+    private final int listenPort;
     private String realClientIp = null;
+
+    public Socks5Handler(int listenPort) {
+        this.listenPort = listenPort;
+    }
 
     private enum Stage {
         PROXY_PROTOCOL,
@@ -189,7 +198,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
 
         String clientIp = getClientIp(ctx);
         int chanId = idGen.incrementAndGet();
-        System.out.println("[CONNECT] " + clientIp + " -> " + host + ":" + port);
+        System.out.println("[CONNECT:" + listenPort + "] " + clientIp + " -> " + host + ":" + port);
         connectAndRelay(ctx, host, port, clientIp, chanId);
     }
 
@@ -210,7 +219,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
             default -> { sendReply(ctx, (byte) 0x08); return; }
         }
 
-        System.out.println("[UDP] " + clientIp + " 请求 UDP 隧道");
+        System.out.println("[UDP:" + listenPort + "] " + clientIp + " requested UDP relay");
 
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(ctx.channel().eventLoop())
@@ -218,7 +227,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 .handler(new ChannelInitializer<NioDatagramChannel>() {
                     @Override
                     protected void initChannel(NioDatagramChannel ch) {
-                        ch.pipeline().addLast(new UdpRelayHandler(ctx.channel(), clientIp));
+                        ch.pipeline().addLast(new UdpRelayHandler(ctx.channel(), clientIp, listenPort));
                     }
                 });
 
@@ -234,10 +243,17 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(ctx.channel().eventLoop())
                 .channel(ctx.channel().getClass())
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
+                .option(ChannelOption.TCP_NODELAY, true)
+                .option(ChannelOption.SO_KEEPALIVE, false)
                 .handler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) {
-                        ch.pipeline().addLast(new RelayHandler(ctx.channel(), clientIp, 1, chanId, host));
+                        ch.pipeline().addLast(new IdleStateHandler(
+                                RelayHandler.IDLE_TIMEOUT_SECONDS,
+                                RelayHandler.IDLE_TIMEOUT_SECONDS,
+                                0));
+                        ch.pipeline().addLast(new RelayHandler(ctx.channel(), clientIp, listenPort, 1, chanId, host));
                     }
                 });
 
@@ -248,7 +264,14 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 String targetAddr = resolveRemoteAddress(f.channel(), host);
                 sendReply(ctx, (byte) 0x00);
                 ctx.pipeline().remove(Socks5Handler.this);
-                ctx.pipeline().addLast(new RelayHandler(f.channel(), clientIp, 0, chanId, targetAddr));
+                if (ctx.pipeline().get(HANDSHAKE_IDLE_HANDLER) != null) {
+                    ctx.pipeline().remove(HANDSHAKE_IDLE_HANDLER);
+                }
+                ctx.pipeline().addLast(new IdleStateHandler(
+                        RelayHandler.IDLE_TIMEOUT_SECONDS,
+                        RelayHandler.IDLE_TIMEOUT_SECONDS,
+                        0));
+                ctx.pipeline().addLast(new RelayHandler(f.channel(), clientIp, listenPort, 0, chanId, targetAddr));
                 stage = Stage.RELAY;
             } else {
                 System.out.println("[CONNECT] 连接失败: " + host + ":" + port);
@@ -276,5 +299,18 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         ctx.close();
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (evt instanceof IdleStateEvent && stage != Stage.RELAY) {
+            ctx.close();
+            return;
+        }
+        super.userEventTriggered(ctx, evt);
+    }
+
+    public static IdleStateHandler newHandshakeIdleHandler() {
+        return new IdleStateHandler(HANDSHAKE_IDLE_TIMEOUT_SECONDS, 0, 0);
     }
 }

@@ -14,7 +14,7 @@ public class TlsSniParser {
     /**
      * 喂入数据，如果成功解析 SNI 则返回域名，否则返回 null
      */
-    public String feed(byte[] data, String clientIp) {
+    public String feed(byte[] data, String clientIp, int listenPort) {
         if (parsed) return null;
         if (data == null || data.length == 0) return null;
 
@@ -35,13 +35,13 @@ public class TlsSniParser {
         if (sni != null) {
             parsed = true;
             bufLen = 0;
-            System.out.printf("[TLS检测] %s -> %s%n", clientIp, sni);
+            System.out.printf("[TLS:%d] %s -> %s%n", listenPort, clientIp, sni);
             //写入数据库
             try {
                 org.detector.qweovodetect.stats.StatsService statsService =
                         SpringContextHolder.getBean(org.detector.qweovodetect.stats.StatsService.class);
                 if (statsService != null) {
-                    statsService.saveSni(clientIp, sni);
+                    statsService.saveSni(clientIp, listenPort, sni);
                 }
             } catch (Exception ignored) {}
         }

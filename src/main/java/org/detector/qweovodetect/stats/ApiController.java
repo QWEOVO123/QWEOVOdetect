@@ -27,6 +27,11 @@ public class ApiController {
         return statsService.getAllClientsSummary();
     }
 
+    @GetMapping("/ports/summary")
+    public List<Map<String, Object>> portSummary() {
+        return statsService.getPortSummary();
+    }
+
     // 总记录数
     @GetMapping("/total")
     public Map<String, Object> total() {

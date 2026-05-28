@@ -8,7 +8,9 @@ import java.util.Optional;
 
 public interface RiskTargetRepository extends JpaRepository<RiskTarget, Long> {
 
-    Optional<RiskTarget> findByProtocolAndTargetIp(String protocol, String targetIp);
+    Optional<RiskTarget> findByProtocolAndListenPortAndTargetIp(String protocol, int listenPort, String targetIp);
 
     List<RiskTarget> findByProtocolOrderByLastSeenTimeDesc(String protocol);
+
+    List<RiskTarget> findByProtocolAndListenPortOrderByLastSeenTimeDesc(String protocol, int listenPort);
 }
