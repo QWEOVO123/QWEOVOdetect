@@ -21,19 +21,19 @@ QWEOVOdetect/
 │  ├─ server/      # SOCKS5 服务、TCP relay、UDP relay
 │  ├─ dpi/         # DPI 检测模块：SNI、SS、Trojan 等
 │  ├─ stats/       # API、统计服务、数据库实体与仓库
-│  └─ config/      # 登录认证、JWT、安全配置
+│  └─ config/      # 登录认证、安全配置
 ├─ src/main/resources/
 │  ├─ application.yml
 │  └─ templates/
 ├─ qweovo-front/   # Vue 前端项目
-├─ data/           # H2 数据库文件目录
+├─ data/           # 本地数据库文件目录，建议不要提交真实运行数据
 ├─ build.gradle
 └─ gradlew.bat
 ```
 
 ## 后端模块说明
 
-- `Socks5Server`：启动 SOCKS5 监听服务，默认端口 `1080`。
+- `Socks5Server`：启动 SOCKS5 监听服务，默认监听 `1080-1090`。
 - `Socks5Handler`：处理 SOCKS5 握手、CONNECT、UDP ASSOCIATE。
 - `RelayHandler`：TCP 双向转发，同时把 TCP 数据喂给 DPI 模块。
 - `UdpRelayHandler`：原生 UDP 转发，不参与 DPI 检测。
@@ -55,6 +55,8 @@ src/main/resources/application.yml
 ./data/socks5_stats
 ```
 
+实际部署时建议自行调整数据库路径、登录凭据和安全配置，不要在公开仓库中提交真实运行数据、真实账号密码、Token 或密钥。
+
 主要数据包括：
 
 - `sni_logs`：SNI 访问记录
@@ -72,6 +74,7 @@ qweovo-front/
 
 主要页面是 Vue 仪表盘，用来展示：
 
+- 1080-1090 端口维度统计
 - 客户端访问概况
 - TLS / SNI 统计
 - 加密隧道触发排行
@@ -83,14 +86,14 @@ qweovo-front/
 启动后端：
 
 ```powershell
-cd C:\Users\bx200\IdeaProjects\QWEOVOdetect
+cd <项目目录>
 .\gradlew.bat bootRun
 ```
 
 启动前端：
 
 ```powershell
-cd C:\Users\bx200\IdeaProjects\QWEOVOdetect\qweovo-front
+cd <项目目录>\qweovo-front
 npm.cmd run dev
 ```
 
@@ -103,7 +106,7 @@ http://localhost:5173
 后端默认监听：
 
 ```text
-SOCKS5: 127.0.0.1:1080
+SOCKS5: 127.0.0.1:1080-1090
 API:    127.0.0.1:8080
 ```
 
