@@ -134,3 +134,7 @@ npm.cmd run build
 ## 说明
 
 本项目偏向本地研究、检测与可视化用途。UDP 转发只做原生 SOCKS5 UDP relay，不进入 DPI；Trojan 检测只作用于 TCP relay 流量。
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE) for details.
