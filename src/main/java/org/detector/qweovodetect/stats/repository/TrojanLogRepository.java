@@ -12,9 +12,12 @@ public interface TrojanLogRepository extends JpaRepository<TrojanLog, Long> {
 
     long countByTargetIpAndDetectTimeGreaterThanEqual(String targetIp, LocalDateTime since);
 
-    @Query("SELECT t.clientIp, COUNT(t) FROM TrojanLog t WHERE t.targetIp = :targetIp GROUP BY t.clientIp")
-    List<Object[]> findClientsByTargetIp(@Param("targetIp") String targetIp);
+    @Query("SELECT t.clientIp, COUNT(t) FROM TrojanLog t WHERE t.listenPort = :listenPort AND t.targetIp = :targetIp GROUP BY t.clientIp")
+    List<Object[]> findClientsByPortAndTargetIp(@Param("listenPort") int listenPort, @Param("targetIp") String targetIp);
 
-    @Query("SELECT t.clientIp, COUNT(t) FROM TrojanLog t GROUP BY t.clientIp ORDER BY COUNT(t) DESC")
+    @Query("SELECT t.listenPort, t.clientIp, COUNT(t) FROM TrojanLog t GROUP BY t.listenPort, t.clientIp ORDER BY COUNT(t) DESC")
     List<Object[]> findTopClientIps();
+
+    @Query("SELECT t.listenPort, COUNT(t) FROM TrojanLog t GROUP BY t.listenPort")
+    List<Object[]> countByListenPort();
 }

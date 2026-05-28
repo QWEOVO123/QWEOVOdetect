@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "trojan_logs", indexes = {
         @Index(name = "idx_trojan_client_ip", columnList = "clientIp"),
+        @Index(name = "idx_trojan_listen_port", columnList = "listenPort"),
         @Index(name = "idx_trojan_target_ip", columnList = "targetIp"),
         @Index(name = "idx_trojan_time", columnList = "detectTime")
 })
@@ -18,6 +19,9 @@ public class TrojanLog {
 
     @Column(nullable = false)
     private String clientIp;
+
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int listenPort;
 
     @Column(nullable = false)
     private String targetIp;
@@ -35,7 +39,12 @@ public class TrojanLog {
     }
 
     public TrojanLog(String clientIp, String targetIp, int uploadBytes, int downloadBytes) {
+        this(clientIp, 0, targetIp, uploadBytes, downloadBytes);
+    }
+
+    public TrojanLog(String clientIp, int listenPort, String targetIp, int uploadBytes, int downloadBytes) {
         this.clientIp = clientIp;
+        this.listenPort = listenPort;
         this.targetIp = targetIp;
         this.uploadBytes = uploadBytes;
         this.downloadBytes = downloadBytes;
@@ -56,6 +65,14 @@ public class TrojanLog {
 
     public void setClientIp(String clientIp) {
         this.clientIp = clientIp;
+    }
+
+    public int getListenPort() {
+        return listenPort;
+    }
+
+    public void setListenPort(int listenPort) {
+        this.listenPort = listenPort;
     }
 
     public String getTargetIp() {

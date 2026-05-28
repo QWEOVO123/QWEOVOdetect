@@ -9,18 +9,15 @@ import java.util.List;
 
 public interface SsLogRepository extends JpaRepository<SsLog, Long> {
 
-    // 按客户端 IP 触发次数排行
-    @Query("SELECT s.clientIp, COUNT(s) FROM SsLog s GROUP BY s.clientIp ORDER BY COUNT(s) DESC")
+    @Query("SELECT s.listenPort, s.clientIp, COUNT(s) FROM SsLog s GROUP BY s.listenPort, s.clientIp ORDER BY COUNT(s) DESC")
     List<Object[]> findTopClientIps();
 
-    // 按目标 IP 触发次数排行
-    @Query("SELECT s.targetIp, COUNT(s) FROM SsLog s GROUP BY s.targetIp ORDER BY COUNT(s) DESC")
+    @Query("SELECT s.listenPort, s.targetIp, COUNT(s) FROM SsLog s GROUP BY s.listenPort, s.targetIp ORDER BY COUNT(s) DESC")
     List<Object[]> findTopTargetIps();
 
-    // 某目标 IP 被哪些客户端访问
-    @Query("SELECT s.clientIp, COUNT(s) FROM SsLog s WHERE s.targetIp = :targetIp GROUP BY s.clientIp")
-    List<Object[]> findClientsByTargetIp(@Param("targetIp") String targetIp);
+    @Query("SELECT s.clientIp, COUNT(s) FROM SsLog s WHERE s.listenPort = :listenPort AND s.targetIp = :targetIp GROUP BY s.clientIp")
+    List<Object[]> findClientsByPortAndTargetIp(@Param("listenPort") int listenPort, @Param("targetIp") String targetIp);
 
-    // SS 触发总数
-    long count();
+    @Query("SELECT s.listenPort, COUNT(s) FROM SsLog s GROUP BY s.listenPort")
+    List<Object[]> countByListenPort();
 }

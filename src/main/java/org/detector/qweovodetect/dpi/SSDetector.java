@@ -19,7 +19,7 @@ public class SSDetector {
     private static final Map<Integer, Integer> detectCountMap = new ConcurrentHashMap<>();
     private static final Map<Integer, Boolean> detectedChannels = new ConcurrentHashMap<>();
 
-    public static boolean detect(byte[] data, String clientIp, String targetIp, int chanId) {
+    public static boolean detect(byte[] data, String clientIp, int listenPort, String targetIp, int chanId) {
         if (data == null || data.length < MIN_PACKET_SIZE) return false;
 
         if (detectedChannels.containsKey(chanId)) return false;
@@ -36,8 +36,8 @@ public class SSDetector {
             float avgPop = calcAvgPopcount(data);
             float printableRatio = calcPrintableRatio(data);
 
-            System.out.printf("[加密隧道检测] %s -> %s 疑似加密隧道 (熵值=%.2f, ASCII比例=%.1f%%)%n",
-                    clientIp, targetIp, avgPop, printableRatio);
+            System.out.printf("[SS:%d] %s -> %s 疑似加密隧道 (熵值=%.2f, ASCII比例=%.1f%%)%n",
+                    listenPort, clientIp, targetIp, avgPop, printableRatio);
 
             System.out.print("[异常数据流] ");
             for (int i = 0; i < Math.min(16, data.length); i++) {
@@ -46,19 +46,20 @@ public class SSDetector {
             System.out.println();
 
             // 每次检测到立刻入库
-            new Thread(() -> {
+            DpiTaskExecutor.executeDb(() -> {
                 try {
                     StatsService statsService = SpringContextHolder.getBean(StatsService.class);
                     if (statsService != null) {
-                        statsService.saveSs(clientIp, targetIp);
+                        statsService.saveSs(clientIp, listenPort, targetIp);
                     }
                 } catch (Exception ignored) {}
-            }).start();
+            });
 
             // 追踪高危
-            if (SsDetectionTracker.hit(targetIp, clientIp)) {
-                System.out.printf("[高危告警] 目标 %s 3分钟内触发%d次！%n",
-                        targetIp, SsDetectionTracker.getCount(targetIp));
+            String targetKey = listenPort + "|" + targetIp;
+            if (SsDetectionTracker.hit(targetKey, clientIp)) {
+                System.out.printf("[高危告警:%d] 目标 %s 3分钟内触发%d次！%n",
+                        listenPort, targetIp, SsDetectionTracker.getCount(targetKey));
             }
 
             return true;

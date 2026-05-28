@@ -17,11 +17,13 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
     private final Channel tcpChannel;
     private final String clientIp;
+    private final int listenPort;
     private InetSocketAddress clientSender;
 
-    public UdpRelayHandler(Channel tcpChannel, String clientIp) {
+    public UdpRelayHandler(Channel tcpChannel, String clientIp, int listenPort) {
         this.tcpChannel = tcpChannel;
         this.clientIp = clientIp;
+        this.listenPort = listenPort;
     }
 
     @Override
@@ -37,7 +39,7 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
         reply.writeShort(udpLocal.getPort());
 
         tcpChannel.writeAndFlush(reply);
-        System.out.println("[UDP] native relay ready " + bindAddress.getHostAddress() + ":" + udpLocal.getPort());
+        System.out.println("[UDP:" + listenPort + "] native relay ready " + bindAddress.getHostAddress() + ":" + udpLocal.getPort());
     }
 
     @Override
@@ -77,10 +79,18 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
         clientSender = packet.sender();
 
         ByteBuf payload = content.retainedSlice();
-        ctx.writeAndFlush(new DatagramPacket(payload, new InetSocketAddress(target.host(), target.port())));
+        boolean submitted = false;
+        try {
+            ctx.writeAndFlush(new DatagramPacket(payload, new InetSocketAddress(target.host(), target.port())));
+            submitted = true;
+        } finally {
+            if (!submitted) {
+                payload.release();
+            }
+        }
 
-        System.out.printf("[UDP] %s -> %s:%d (%d bytes)%n",
-                clientIp, target.host(), target.port(), payload.readableBytes());
+        System.out.printf("[UDP:%d] %s -> %s:%d (%d bytes)%n",
+                listenPort, clientIp, target.host(), target.port(), payload.readableBytes());
     }
 
     private void relayRemotePacket(ChannelHandlerContext ctx, DatagramPacket packet) {
@@ -96,7 +106,15 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
         wrapped.writeShort(packet.sender().getPort());
         wrapped.writeBytes(packet.content(), packet.content().readerIndex(), packet.content().readableBytes());
 
-        ctx.writeAndFlush(new DatagramPacket(wrapped, destination));
+        boolean submitted = false;
+        try {
+            ctx.writeAndFlush(new DatagramPacket(wrapped, destination));
+            submitted = true;
+        } finally {
+            if (!submitted) {
+                wrapped.release();
+            }
+        }
     }
 
     private Target readTarget(ByteBuf content, byte atyp) {

@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "ss_logs", indexes = {
         @Index(name = "idx_ss_client_ip", columnList = "clientIp"),
+        @Index(name = "idx_ss_listen_port", columnList = "listenPort"),
         @Index(name = "idx_ss_target_ip", columnList = "targetIp"),
         @Index(name = "idx_ss_time", columnList = "detectTime")
 })
@@ -18,6 +19,9 @@ public class SsLog {
     @Column(nullable = false)
     private String clientIp;
 
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int listenPort;
+
     @Column(nullable = false)
     private String targetIp;
 
@@ -27,7 +31,12 @@ public class SsLog {
     public SsLog() {}
 
     public SsLog(String clientIp, String targetIp) {
+        this(clientIp, 0, targetIp);
+    }
+
+    public SsLog(String clientIp, int listenPort, String targetIp) {
         this.clientIp = clientIp;
+        this.listenPort = listenPort;
         this.targetIp = targetIp;
         this.detectTime = LocalDateTime.now();
     }
@@ -37,6 +46,8 @@ public class SsLog {
     public void setId(Long id) { this.id = id; }
     public String getClientIp() { return clientIp; }
     public void setClientIp(String clientIp) { this.clientIp = clientIp; }
+    public int getListenPort() { return listenPort; }
+    public void setListenPort(int listenPort) { this.listenPort = listenPort; }
     public String getTargetIp() { return targetIp; }
     public void setTargetIp(String targetIp) { this.targetIp = targetIp; }
     public LocalDateTime getDetectTime() { return detectTime; }

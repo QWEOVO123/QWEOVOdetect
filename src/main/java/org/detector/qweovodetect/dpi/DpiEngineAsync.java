@@ -2,36 +2,30 @@ package org.detector.qweovodetect.dpi;
 
 import io.netty.buffer.ByteBuf;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
 public class DpiEngineAsync {
-
-    private static final ExecutorService DPI_POOL =
-            Executors.newFixedThreadPool(
-                    Runtime.getRuntime().availableProcessors()
-            );
 
     public static void inspect(ByteBuf buf,
                                String clientIp,
+                               int listenPort,
                                String targetIp,
                                int chanId) {
-        inspect(buf, clientIp, targetIp, chanId, 0);
+        inspect(buf, clientIp, listenPort, targetIp, chanId, 0);
     }
 
     public static void inspect(ByteBuf buf,
                                String clientIp,
+                               int listenPort,
                                String targetIp,
                                int chanId,
                                int dir) {
+        if (buf == null || !buf.isReadable() || !DpiEngine.shouldInspect(chanId, dir)) {
+            return;
+        }
 
-        ByteBuf copy = buf.retainedSlice();
-        DPI_POOL.execute(() -> {
-            try {
-                DpiEngine.inspect(copy, clientIp, targetIp, chanId, dir);
-            } finally {
-                copy.release();
-            }
-        });
+        int len = Math.min(buf.readableBytes(), DpiEngine.MAX_CHUNK_INSPECT);
+        byte[] copy = new byte[len];
+        buf.getBytes(buf.readerIndex(), copy, 0, len);
+
+        DpiTaskExecutor.executeDpi(() -> DpiEngine.inspect(copy, clientIp, listenPort, targetIp, chanId, dir));
     }
 }

@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "sni_logs", indexes = {
         @Index(name = "idx_sni_host", columnList = "sniHost"),
+        @Index(name = "idx_sni_listen_port", columnList = "listenPort"),
         @Index(name = "idx_sni_time", columnList = "detectTime")
 })
 public class SniLog {
@@ -17,6 +18,9 @@ public class SniLog {
     @Column(nullable = false)
     private String clientIp;
 
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    private int listenPort;
+
     @Column(nullable = false)
     private String sniHost;
 
@@ -26,7 +30,12 @@ public class SniLog {
     public SniLog() {}
 
     public SniLog(String clientIp, String sniHost) {
+        this(clientIp, 0, sniHost);
+    }
+
+    public SniLog(String clientIp, int listenPort, String sniHost) {
         this.clientIp = clientIp;
+        this.listenPort = listenPort;
         this.sniHost = sniHost;
         this.detectTime = LocalDateTime.now();
     }
@@ -35,6 +44,8 @@ public class SniLog {
     public void setId(Long id) { this.id = id; }
     public String getClientIp() { return clientIp; }
     public void setClientIp(String clientIp) { this.clientIp = clientIp; }
+    public int getListenPort() { return listenPort; }
+    public void setListenPort(int listenPort) { this.listenPort = listenPort; }
     public String getSniHost() { return sniHost; }
     public void setSniHost(String sniHost) { this.sniHost = sniHost; }
     public LocalDateTime getDetectTime() { return detectTime; }
