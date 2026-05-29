@@ -1,6 +1,6 @@
 # QWEOVOdetect
 
-QWEOVOdetect 是一个本地 SOCKS5 / DPI 流量检测项目，项目用于观察代理流量中的 HTTP Host、TLS SNI、QUIC SNI、疑似加密隧道和 Trojan 特征，并把检测结果保存到数据库，再通过 Vue 前端进行展示和管理。
+QWEOVOdetect - 开源的 SOCKS5 代理审计与滥用检测系统，保护你的 VPS 不被滥用
 
 ## 主要功能
 
