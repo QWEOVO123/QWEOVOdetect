@@ -44,6 +44,13 @@ public class TlsSniParser {
                     statsService.saveSni(clientIp, listenPort, sni);
                 }
             } catch (Exception ignored) {}
+            try {
+                org.detector.qweovodetect.stats.ForensicsService forensicsService =
+                        SpringContextHolder.getBean(org.detector.qweovodetect.stats.ForensicsService.class);
+                if (forensicsService != null) {
+                    forensicsService.recordTls(listenPort, clientIp, sni);
+                }
+            } catch (Exception ignored) {}
         }
         return sni;
     }

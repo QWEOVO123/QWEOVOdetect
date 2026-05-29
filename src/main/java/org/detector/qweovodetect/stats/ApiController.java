@@ -15,10 +15,12 @@ public class ApiController {
 
     private final StatsService statsService;
     private final BlockRuleService blockRuleService;
+    private final ForensicsService forensicsService;
 
-    public ApiController(StatsService statsService, BlockRuleService blockRuleService) {
+    public ApiController(StatsService statsService, BlockRuleService blockRuleService, ForensicsService forensicsService) {
         this.statsService = statsService;
         this.blockRuleService = blockRuleService;
+        this.forensicsService = forensicsService;
     }
 
     // 域名排行
@@ -107,5 +109,27 @@ public class ApiController {
     public Map<String, Object> deleteBlockRule(@PathVariable Long id) {
         blockRuleService.deleteRule(id);
         return Map.of("ok", true);
+    }
+
+    @GetMapping("/forensics")
+    public List<Map<String, Object>> forensicsSessions() {
+        return forensicsService.listSessions();
+    }
+
+    @PostMapping("/forensics/start")
+    public Map<String, Object> startForensics(@RequestBody ForensicsStartRequest request) {
+        try {
+            return forensicsService.start(request.listenPort(), request.fileName(), request.durationMinutes());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    @PostMapping("/forensics/{listenPort}/stop")
+    public Map<String, Object> stopForensics(@PathVariable int listenPort) {
+        return Map.of("stopped", forensicsService.stop(listenPort));
+    }
+
+    public record ForensicsStartRequest(int listenPort, String fileName, int durationMinutes) {
     }
 }

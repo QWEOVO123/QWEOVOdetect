@@ -2,6 +2,7 @@ package org.detector.qweovodetect.dpi;
 
 import io.netty.buffer.ByteBuf;
 import org.detector.qweovodetect.stats.BlockRuleService;
+import org.detector.qweovodetect.stats.ForensicsService;
 import org.detector.qweovodetect.stats.StatsService;
 
 import javax.crypto.Cipher;
@@ -93,6 +94,7 @@ public class QuicSniDpiEngine {
                     listenPort, clientIp, targetHost, targetPort, sni);
 
             DpiTaskExecutor.executeDb(() -> saveSni(clientIp, listenPort, sni));
+            recordForensics(clientIp, listenPort, targetHost, targetPort, sni);
             return isBlocked(sni, clientIp, listenPort, targetHost, targetPort);
         }
     }
@@ -397,6 +399,16 @@ public class QuicSniDpiEngine {
             }
         } catch (Exception e) {
             System.out.println("[QUIC] save failed: " + e.getMessage());
+        }
+    }
+
+    private static void recordForensics(String clientIp, int listenPort, String targetHost, int targetPort, String sni) {
+        try {
+            ForensicsService forensicsService = SpringContextHolder.getBean(ForensicsService.class);
+            if (forensicsService != null) {
+                forensicsService.recordQuic(listenPort, clientIp, targetHost, targetPort, sni);
+            }
+        } catch (Exception ignored) {
         }
     }
 
