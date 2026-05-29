@@ -1,6 +1,6 @@
 # QWEOVOdetect
 
-QWEOVOdetect - 开源的 SOCKS5 代理审计与滥用检测系统，保护你的 VPS 不被滥用
+QWEOVOdetect - 开源的 SOCKS5 代理审计与滥用检测系统，保护你的Xray不被滥用
 
 ## 主要功能
 
