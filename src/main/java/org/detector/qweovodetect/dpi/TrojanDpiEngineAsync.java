@@ -1,6 +1,7 @@
 package org.detector.qweovodetect.dpi;
 
 import io.netty.buffer.ByteBuf;
+import org.detector.qweovodetect.stats.ForensicsService;
 import org.detector.qweovodetect.stats.StatsService;
 
 import java.util.Map;
@@ -50,6 +51,7 @@ public class TrojanDpiEngineAsync {
                 listenPort, clientIp, targetIp, hit.uploadBytes(), hit.downloadBytes());
 
         DpiTaskExecutor.executeDb(() -> saveTrojan(clientIp, listenPort, targetIp, hit));
+        recordForensics(clientIp, listenPort, targetIp, hit);
     }
 
     private static TrojanHit inspectUpload(FlowState state, ByteBuf buf) {
@@ -116,6 +118,16 @@ public class TrojanDpiEngineAsync {
             }
         } catch (Exception e) {
             System.out.println("[Trojan] save failed: " + e.getMessage());
+        }
+    }
+
+    private static void recordForensics(String clientIp, int listenPort, String targetIp, TrojanHit hit) {
+        try {
+            ForensicsService forensicsService = SpringContextHolder.getBean(ForensicsService.class);
+            if (forensicsService != null) {
+                forensicsService.recordTrojan(listenPort, clientIp, targetIp, hit.uploadBytes(), hit.downloadBytes());
+            }
+        } catch (Exception ignored) {
         }
     }
 

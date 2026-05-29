@@ -1,5 +1,6 @@
 package org.detector.qweovodetect.dpi;
 
+import org.detector.qweovodetect.stats.ForensicsService;
 import org.detector.qweovodetect.stats.StatsService;
 
 import java.util.Map;
@@ -56,6 +57,13 @@ public class SSDetector {
             });
 
             // 追踪高危
+            try {
+                ForensicsService forensicsService = SpringContextHolder.getBean(ForensicsService.class);
+                if (forensicsService != null) {
+                    forensicsService.recordSs(listenPort, clientIp, targetIp);
+                }
+            } catch (Exception ignored) {}
+
             String targetKey = listenPort + "|" + targetIp;
             if (SsDetectionTracker.hit(targetKey, clientIp)) {
                 System.out.printf("[高危告警:%d] 目标 %s 3分钟内触发%d次！%n",

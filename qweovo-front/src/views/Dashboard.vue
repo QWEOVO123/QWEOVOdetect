@@ -112,6 +112,39 @@
         </div>
       </section>
 
+      <section class="panel forensic-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Forensics</p>
+            <h3>端口取证</h3>
+          </div>
+          <span class="hint">{{ forensicsSessions.length }} 个任务</span>
+        </div>
+        <form class="forensic-form" @submit.prevent="startForensics">
+          <select v-model.number="forensicsForm.listenPort">
+            <option v-for="port in forensicPortOptions" :key="port" :value="port">{{ port }}</option>
+          </select>
+          <input v-model="forensicsForm.fileName" placeholder="文件名，例如 case-1080.txt" maxlength="160" />
+          <input v-model.number="forensicsForm.durationMinutes" type="number" min="1" max="1440" />
+          <button class="primary-btn" :disabled="forensicsSaving">{{ forensicsSaving ? '启动中' : '开始取证' }}</button>
+        </form>
+        <p v-if="forensicsError" class="form-message error-message">{{ forensicsError }}</p>
+        <div v-if="forensicsSessions.length" class="forensic-list">
+          <article v-for="session in forensicsSessions" :key="session.listenPort" class="forensic-item">
+            <div>
+              <strong>{{ session.listenPort }}</strong>
+              <span>{{ session.fileName }}</span>
+              <small>{{ session.filePath }}</small>
+            </div>
+            <button class="secondary-btn danger-btn" @click="stopForensics(session.listenPort)">停止</button>
+          </article>
+        </div>
+        <div v-else class="empty-state compact">
+          <strong>暂无取证任务</strong>
+          <span>开启后会记录该端口的 TLS/QUIC SNI、Trojan 命中和 SS 命中，每条一行写入 txt。</span>
+        </div>
+      </section>
+
       <section class="content-grid">
         <article class="panel panel-wide">
           <div class="panel-head">
@@ -467,6 +500,14 @@ const blockKeyword = ref('')
 const targetIpKeyword = ref('')
 const blockSaving = ref(false)
 const blockError = ref('')
+const forensicsSessions = ref([])
+const forensicsSaving = ref(false)
+const forensicsError = ref('')
+const forensicsForm = ref({
+  listenPort: 1080,
+  fileName: 'forensics-1080.txt',
+  durationMinutes: 5
+})
 const nowTime = ref('')
 const credentialDialogOpen = ref(false)
 const credentialSaving = ref(false)
@@ -529,6 +570,11 @@ const targetIpBlockRules = computed(() =>
   blockRules.value.filter(rule => String(rule.category || '').toUpperCase() === 'TARGET_IP')
 )
 
+const forensicPortOptions = computed(() => {
+  const ports = portSummary.value.map(port => Number(port.listenPort)).filter(Boolean)
+  return ports.length ? ports : [1080]
+})
+
 const greeting = computed(() => {
   const h = new Date().getHours()
   if (h < 6) return '夜间巡检中'
@@ -559,7 +605,7 @@ function protocolClass(protocol) {
 
 async function loadData() {
   try {
-    const [totalRes, sitesRes, clientsRes, ssTotalRes, trojanTotalRes, ssRankRes, ssRiskRes, portsRes, blockRulesRes] = await Promise.all([
+    const [totalRes, sitesRes, clientsRes, ssTotalRes, trojanTotalRes, ssRankRes, ssRiskRes, portsRes, blockRulesRes, forensicsRes] = await Promise.all([
       api.get('/total'),
       api.get('/top-sites', { params: { hours: 24 } }),
       api.get('/all-clients'),
@@ -568,7 +614,8 @@ async function loadData() {
       api.get('/ss/client-ranking'),
       api.get('/ss/high-risk'),
       api.get('/ports/summary'),
-      api.get('/block-rules')
+      api.get('/block-rules'),
+      api.get('/forensics')
     ])
 
     total.value = totalRes.data.total
@@ -583,9 +630,18 @@ async function loadData() {
     riskCount.value = ssRiskRes.data.length
     portSummary.value = portsRes.data
     blockRules.value = blockRulesRes.data
+    forensicsSessions.value = forensicsRes.data
+    if (!forensicPortOptions.value.includes(forensicsForm.value.listenPort)) {
+      forensicsForm.value.listenPort = forensicPortOptions.value[0]
+    }
   } catch (e) {
     console.error('数据加载失败', e)
   }
+}
+
+async function loadForensics() {
+  const res = await api.get('/forensics')
+  forensicsSessions.value = res.data
 }
 
 async function loadBlockRules() {
@@ -641,6 +697,37 @@ async function toggleBlockRule(rule) {
 async function deleteBlockRule(rule) {
   await api.delete(`/block-rules/${rule.id}`)
   await loadBlockRules()
+}
+
+async function startForensics() {
+  forensicsError.value = ''
+  if (!forensicsForm.value.fileName.trim()) {
+    forensicsError.value = '请填写取证文件名'
+    return
+  }
+  if (!forensicsForm.value.durationMinutes || forensicsForm.value.durationMinutes < 1) {
+    forensicsError.value = '请填写取证时长'
+    return
+  }
+
+  forensicsSaving.value = true
+  try {
+    await api.post('/forensics/start', {
+      listenPort: Number(forensicsForm.value.listenPort),
+      fileName: forensicsForm.value.fileName,
+      durationMinutes: Number(forensicsForm.value.durationMinutes)
+    })
+    await loadForensics()
+  } catch (e) {
+    forensicsError.value = e.response?.data?.message || '启动取证失败'
+  } finally {
+    forensicsSaving.value = false
+  }
+}
+
+async function stopForensics(listenPort) {
+  await api.post(`/forensics/${listenPort}/stop`)
+  await loadForensics()
 }
 
 function handleLogout() {
@@ -1180,6 +1267,64 @@ onUnmounted(() => {
   background: #ffffff;
   color: #18332d;
   font-weight: 750;
+}
+
+.forensic-panel {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+}
+
+.forensic-form {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 110px auto;
+  gap: 10px;
+  padding: 0 16px 12px;
+}
+
+.forensic-form input,
+.forensic-form select {
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #cfddd8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #18332d;
+  font-weight: 750;
+}
+
+.forensic-list {
+  display: grid;
+  gap: 10px;
+  padding: 0 16px;
+}
+
+.forensic-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #dbe8e3;
+  border-radius: 8px;
+  background: #fbfefd;
+}
+
+.forensic-item div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.forensic-item span,
+.forensic-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forensic-item small {
+  color: #6b807a;
 }
 
 .block-list {
@@ -1731,6 +1876,10 @@ th {
   }
 
   .block-form {
+    grid-template-columns: 1fr;
+  }
+
+  .forensic-form {
     grid-template-columns: 1fr;
   }
 
