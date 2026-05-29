@@ -10,7 +10,9 @@ import io.netty.handler.codec.haproxy.*;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
+import org.detector.qweovodetect.dpi.SpringContextHolder;
 import org.detector.qweovodetect.stats.AuthConfigService;
+import org.detector.qweovodetect.stats.BlockRuleService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -336,6 +338,13 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
         future.addListener((ChannelFutureListener) f -> {
             if (f.isSuccess()) {
                 String targetAddr = resolveRemoteAddress(f.channel(), host);
+                if (isTargetIpBlocked(targetAddr)) {
+                    System.out.printf("[BLOCK:TARGET_IP:%d] %s -> %s:%d%n", listenPort, clientIp, targetAddr, port);
+                    f.channel().close();
+                    sendReply(ctx, (byte) 0x02);
+                    ctx.close();
+                    return;
+                }
                 sendReply(ctx, (byte) 0x00);
                 ctx.pipeline().remove(Socks5Handler.this);
                 if (ctx.pipeline().get(HANDSHAKE_IDLE_HANDLER) != null) {
@@ -353,6 +362,15 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 ctx.close();
             }
         });
+    }
+
+    private boolean isTargetIpBlocked(String targetIp) {
+        try {
+            BlockRuleService blockRuleService = SpringContextHolder.getBean(BlockRuleService.class);
+            return blockRuleService != null && blockRuleService.shouldBlockTargetIp(targetIp);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String resolveRemoteAddress(Channel channel, String fallback) {

@@ -7,6 +7,8 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramPacket;
 import org.detector.qweovodetect.dpi.QuicSniDpiEngine;
+import org.detector.qweovodetect.dpi.SpringContextHolder;
+import org.detector.qweovodetect.stats.BlockRuleService;
 
 import java.net.Inet4Address;
 import java.net.Inet6Address;
@@ -79,6 +81,12 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
         clientSender = packet.sender();
 
+        if (isTargetIpBlocked(target.host())) {
+            System.out.printf("[UDP:%d] drop blocked target IP %s -> %s:%d (%d bytes)%n",
+                    listenPort, clientIp, target.host(), target.port(), content.readableBytes());
+            return;
+        }
+
         ByteBuf payload = content.retainedSlice();
         boolean submitted = false;
         try {
@@ -97,6 +105,16 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
         System.out.printf("[UDP:%d] %s -> %s:%d (%d bytes)%n",
                 listenPort, clientIp, target.host(), target.port(), payload.readableBytes());
+    }
+
+    private boolean isTargetIpBlocked(String host) {
+        try {
+            InetAddress address = InetAddress.getByName(host);
+            BlockRuleService blockRuleService = SpringContextHolder.getBean(BlockRuleService.class);
+            return blockRuleService != null && blockRuleService.shouldBlockTargetIp(address.getHostAddress());
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void relayRemotePacket(ChannelHandlerContext ctx, DatagramPacket packet) {

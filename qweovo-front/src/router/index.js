@@ -24,16 +24,16 @@ const router = createRouter({
 
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
-  let firstStartup = false
+  let setupLocked = false
 
   try {
     const setup = await authStore.setupStatus()
-    firstStartup = Boolean(setup.firstStartup)
+    setupLocked = Boolean(setup.firstStartup || setup.pendingRestart)
   } catch (e) {
-    firstStartup = false
+    setupLocked = false
   }
 
-  if (firstStartup) {
+  if (setupLocked) {
     if (to.path !== '/login') {
       next('/login')
       return

@@ -25,6 +25,10 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> body) {
+        if (authConfigService.isPendingRestart()) {
+            return ResponseEntity.status(423).body(Map.of("error", "配置已保存，需要重启后端服务后才能登录"));
+        }
+
         String username = body.get("username");
         String password = body.get("password");
 

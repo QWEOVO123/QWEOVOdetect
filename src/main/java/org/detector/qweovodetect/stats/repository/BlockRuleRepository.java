@@ -10,7 +10,11 @@ public interface BlockRuleRepository extends JpaRepository<BlockRule, Long> {
 
     List<BlockRule> findByEnabledTrueOrderByCreateTimeDesc();
 
+    List<BlockRule> findByCategoryAndEnabledTrueOrderByCreateTimeDesc(String category);
+
     List<BlockRule> findAllByOrderByCreateTimeDesc();
 
     Optional<BlockRule> findByKeyword(String keyword);
+
+    Optional<BlockRule> findByCategoryAndKeyword(String category, String keyword);
 }

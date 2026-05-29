@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(name = "block_rules", indexes = {
         @Index(name = "idx_block_keyword", columnList = "keyword"),
+        @Index(name = "idx_block_category", columnList = "category"),
         @Index(name = "idx_block_enabled", columnList = "enabled")
 })
 public class BlockRule {
@@ -18,6 +19,9 @@ public class BlockRule {
     @Column(nullable = false, unique = true, length = 128)
     private String keyword;
 
+    @Column(nullable = false, length = 32, columnDefinition = "varchar(32) default 'DOMAIN'")
+    private String category = "DOMAIN";
+
     @Column(nullable = false)
     private boolean enabled = true;
 
@@ -28,7 +32,12 @@ public class BlockRule {
     }
 
     public BlockRule(String keyword) {
+        this(keyword, "DOMAIN");
+    }
+
+    public BlockRule(String keyword, String category) {
         this.keyword = keyword;
+        this.category = category;
         this.enabled = true;
         this.createTime = LocalDateTime.now();
     }
@@ -43,6 +52,14 @@ public class BlockRule {
 
     public void setKeyword(String keyword) {
         this.keyword = keyword;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
     }
 
     public boolean isEnabled() {

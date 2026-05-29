@@ -24,5 +24,9 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
             jdbcTemplate.update("UPDATE sni_logs SET protocol = 'TLS' WHERE protocol IS NULL");
         } catch (Exception ignored) {
         }
+        try {
+            jdbcTemplate.update("UPDATE block_rules SET category = 'DOMAIN' WHERE category IS NULL");
+        } catch (Exception ignored) {
+        }
     }
 }

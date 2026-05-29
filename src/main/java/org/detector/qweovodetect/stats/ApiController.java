@@ -85,6 +85,15 @@ public class ApiController {
         }
     }
 
+    @PostMapping("/block-rules/target-ip")
+    public BlockRule addTargetIpBlockRule(@RequestBody Map<String, String> body) {
+        try {
+            return blockRuleService.addTargetIpRule(body.get("ip"));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
     @PostMapping("/block-rules/{id}/enabled")
     public BlockRule setBlockRuleEnabled(@PathVariable Long id, @RequestBody Map<String, Boolean> body) {
         try {

@@ -20,6 +20,12 @@
         <h2>初始化系统</h2>
       </div>
 
+      <div v-if="pendingRestart" class="restart-lock">
+        <strong>配置已保存</strong>
+        <span>请重启后端服务，重启完成后才能继续登录和使用控制台。</span>
+      </div>
+
+      <template v-else>
       <label class="field">
         <span>初始用户名</span>
         <input v-model="initialAuth.username" autocomplete="username" placeholder="请输入用户名" />
@@ -124,6 +130,7 @@
 
       <p v-if="setupMessage" class="notice" :class="{ warn: setupRequiresRestart }">{{ setupMessage }}</p>
       <p v-if="error" class="error">{{ error }}</p>
+      </template>
     </section>
 
     <section v-else class="login-card" aria-label="登录">
@@ -174,6 +181,7 @@ const setupMode = ref(false)
 const setupSaving = ref(false)
 const setupMessage = ref('')
 const setupRequiresRestart = ref(false)
+const pendingRestart = ref(false)
 const initialAuth = ref({
   username: '',
   password: '',
@@ -197,7 +205,8 @@ const inboundForms = ref([newInbound()])
 onMounted(async () => {
   try {
     const status = await authStore.setupStatus()
-    setupMode.value = Boolean(status.firstStartup)
+    pendingRestart.value = Boolean(status.pendingRestart)
+    setupMode.value = Boolean(status.firstStartup || status.pendingRestart)
     applyDatabase(status.database)
     applyRuntime(status)
   } catch (e) {
@@ -296,10 +305,11 @@ async function saveSetup() {
       inbounds: inboundPayload()
     })
     setupRequiresRestart.value = result.requiresRestart
+    pendingRestart.value = Boolean(result.pendingRestart || result.requiresRestart)
     setupMessage.value = result.requiresRestart
       ? '数据库配置已保存，请重启后端服务后再登录。'
       : '数据库配置已保存，可以继续登录。'
-    setupMode.value = Boolean(result.requiresRestart)
+    setupMode.value = true
   } catch (e) {
     error.value = e.response?.data?.error || '保存数据库配置失败'
   } finally {
@@ -672,6 +682,20 @@ async function handleLogin() {
 .notice.warn {
   background: #fff0cc;
   color: #b45309;
+}
+
+.restart-lock {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid #facc15;
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.restart-lock strong {
+  color: #78350f;
 }
 
 @media (max-width: 860px) {
