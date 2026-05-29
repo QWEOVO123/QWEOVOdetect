@@ -22,22 +22,22 @@ import java.util.TreeMap;
 @Service
 public class StatsService {
 
-    private static final int START_PORT = 1080;
-    private static final int END_PORT = 1090;
-
     private final SniLogRepository sniLogRepository;
     private final SsLogRepository ssLogRepository;
     private final TrojanLogRepository trojanLogRepository;
     private final RiskTargetRepository riskTargetRepository;
+    private final AuthConfigService authConfigService;
 
     public StatsService(SniLogRepository sniLogRepository,
                         SsLogRepository ssLogRepository,
                         TrojanLogRepository trojanLogRepository,
-                        RiskTargetRepository riskTargetRepository) {
+                        RiskTargetRepository riskTargetRepository,
+                        AuthConfigService authConfigService) {
         this.sniLogRepository = sniLogRepository;
         this.ssLogRepository = ssLogRepository;
         this.trojanLogRepository = trojanLogRepository;
         this.riskTargetRepository = riskTargetRepository;
+        this.authConfigService = authConfigService;
     }
 
     public void saveSni(String clientIp, String sniHost) {
@@ -172,9 +172,13 @@ public class StatsService {
 
     public List<Map<String, Object>> getPortSummary() {
         Map<Integer, Map<String, Object>> ports = new TreeMap<>();
-        for (int port = START_PORT; port <= END_PORT; port++) {
+        for (AuthConfigService.InboundConfig inbound : authConfigService.currentInbounds()) {
+            int port = inbound.port();
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("listenPort", port);
+            item.put("nickname", inbound.nickname());
+            item.put("enabled", inbound.enabled());
+            item.put("authEnabled", inbound.authEnabled());
             item.put("clientCount", 0L);
             item.put("sniTotal", 0L);
             item.put("domainCount", 0L);

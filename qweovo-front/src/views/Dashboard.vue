@@ -13,6 +13,7 @@
         <span class="status-dot"></span>
         <span class="time">{{ nowTime }}</span>
         <span class="user">{{ authStore.username }}</span>
+        <button class="secondary-btn" @click="openRuntimeDialog" title="修改 API 端口和入站配置">入站设置</button>
         <button class="secondary-btn" @click="openDatabaseDialog" title="修改数据库配置">数据库设置</button>
         <button class="secondary-btn" @click="openCredentialDialog" title="修改用户名和密码">账号设置</button>
         <button class="logout-btn" @click="handleLogout" title="退出登录">退出</button>
@@ -46,7 +47,7 @@
             <p class="eyebrow">Ports</p>
             <h3>SOCKS5 端口用户概览</h3>
           </div>
-          <span class="hint">1080-1090 独立统计</span>
+          <span class="hint">按入站端口独立统计</span>
         </div>
         <div class="port-grid">
           <article v-for="port in portSummary" :key="port.listenPort" class="port-card">
@@ -284,6 +285,80 @@
       </section>
     </div>
 
+    <div v-if="runtimeDialogOpen" class="modal-backdrop" @click.self="closeRuntimeDialog">
+      <section class="modal wide-modal" aria-label="入站设置">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow">Inbound</p>
+            <h3>API 与 SOCKS5 入站</h3>
+          </div>
+          <button class="icon-btn" @click="closeRuntimeDialog" aria-label="关闭">×</button>
+        </div>
+
+        <div class="modal-body">
+          <label class="field">
+            <span>当前用户名</span>
+            <input v-model="runtimeForm.oldUsername" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>当前密码</span>
+            <input v-model="runtimeForm.oldPassword" type="password" autocomplete="current-password" />
+          </label>
+          <label class="field">
+            <span>API 监听端口</span>
+            <input v-model.number="runtimeForm.api.port" type="number" min="1" max="65535" />
+          </label>
+
+          <div class="runtime-head">
+            <strong>SOCKS5 入站</strong>
+            <button type="button" class="secondary-btn" @click="addRuntimeInbound">添加入站</button>
+          </div>
+          <div v-for="(inbound, index) in runtimeForm.inbounds" :key="inbound.id || index" class="runtime-inbound">
+            <div class="runtime-inbound-head">
+              <strong>入站 {{ index + 1 }}</strong>
+              <button v-if="runtimeForm.inbounds.length > 1" type="button" class="secondary-btn danger-btn" @click="removeRuntimeInbound(index)">删除</button>
+            </div>
+            <label class="field">
+              <span>昵称</span>
+              <input v-model="inbound.nickname" />
+            </label>
+            <label class="field">
+              <span>监听端口</span>
+              <input v-model.number="inbound.port" type="number" min="1" max="65535" />
+            </label>
+            <label class="toggle-row">
+              <input v-model="inbound.enabled" type="checkbox" />
+              <span>启用这个入站</span>
+            </label>
+            <label class="toggle-row">
+              <input v-model="inbound.authEnabled" type="checkbox" />
+              <span>启用 SOCKS5 用户名密码认证</span>
+            </label>
+            <template v-if="inbound.authEnabled">
+              <label class="field">
+                <span>SOCKS5 用户名</span>
+                <input v-model="inbound.username" autocomplete="username" />
+              </label>
+              <label class="field">
+                <span>SOCKS5 新密码</span>
+                <input v-model="inbound.password" type="password" autocomplete="new-password" placeholder="留空则保持原密码" />
+              </label>
+            </template>
+          </div>
+
+          <p v-if="runtimeError" class="form-message error-message">{{ runtimeError }}</p>
+          <p v-if="runtimeSuccess" class="form-message success-message">{{ runtimeSuccess }}</p>
+        </div>
+
+        <div class="modal-actions">
+          <button class="secondary-btn" @click="closeRuntimeDialog">取消</button>
+          <button class="primary-btn" :disabled="runtimeSaving" @click="submitRuntime">
+            {{ runtimeSaving ? '保存中' : '保存配置' }}
+          </button>
+        </div>
+      </section>
+    </div>
+
     <div v-if="databaseDialogOpen" class="modal-backdrop" @click.self="closeDatabaseDialog">
       <section class="modal" aria-label="修改数据库配置">
         <div class="modal-head">
@@ -385,6 +460,10 @@ const databaseDialogOpen = ref(false)
 const databaseSaving = ref(false)
 const databaseError = ref('')
 const databaseSuccess = ref('')
+const runtimeDialogOpen = ref(false)
+const runtimeSaving = ref(false)
+const runtimeError = ref('')
+const runtimeSuccess = ref('')
 const credentialForm = ref({
   oldUsername: '',
   oldPassword: '',
@@ -403,12 +482,21 @@ const databaseForm = ref({
   username: '',
   password: ''
 })
+const runtimeForm = ref({
+  oldUsername: '',
+  oldPassword: '',
+  api: {
+    address: '127.0.0.1',
+    port: 8080
+  },
+  inbounds: []
+})
 let timer = null
 
 const avatarList = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
 
 const metrics = computed(() => [
-  { label: '监听端口', value: portSummary.value.length || 11, icon: 'PT', tone: 'tone-green' },
+  { label: '监听端口', value: portSummary.value.length || 0, icon: 'PT', tone: 'tone-green' },
   { label: '客户端', value: clientCount.value, icon: 'CL', tone: 'tone-blue' },
   { label: 'TLS 记录', value: total.value, icon: 'TLS', tone: 'tone-blue' },
   { label: '活跃域名', value: sites.value, icon: 'DNS', tone: 'tone-cyan' },
@@ -532,6 +620,134 @@ function openCredentialDialog() {
 function closeCredentialDialog() {
   if (credentialSaving.value) return
   credentialDialogOpen.value = false
+}
+
+async function openRuntimeDialog() {
+  runtimeDialogOpen.value = true
+  runtimeError.value = ''
+  runtimeSuccess.value = ''
+  runtimeForm.value.oldUsername = authStore.username || ''
+  runtimeForm.value.oldPassword = ''
+  try {
+    const status = await authStore.setupStatus()
+    applyRuntime(status)
+  } catch (e) {
+    runtimeError.value = '读取入站配置失败'
+  }
+}
+
+function closeRuntimeDialog() {
+  if (runtimeSaving.value) return
+  runtimeDialogOpen.value = false
+}
+
+function newRuntimeInbound() {
+  return {
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+    nickname: '默认入站',
+    port: 1080,
+    enabled: true,
+    authEnabled: false,
+    username: '',
+    password: ''
+  }
+}
+
+function applyRuntime(status) {
+  runtimeForm.value.api = {
+    address: status.api?.address || '127.0.0.1',
+    port: status.api?.port || 8080
+  }
+  runtimeForm.value.inbounds = Array.isArray(status.inbounds) && status.inbounds.length
+    ? status.inbounds.map(inbound => ({
+        id: inbound.id,
+        nickname: inbound.nickname || `入站 ${inbound.port || 1080}`,
+        port: inbound.port || 1080,
+        enabled: inbound.enabled !== false,
+        authEnabled: Boolean(inbound.authEnabled),
+        username: inbound.username || '',
+        password: ''
+      }))
+    : [newRuntimeInbound()]
+}
+
+function addRuntimeInbound() {
+  runtimeForm.value.inbounds.push({
+    ...newRuntimeInbound(),
+    nickname: `入站 ${runtimeForm.value.inbounds.length + 1}`,
+    port: 1080 + runtimeForm.value.inbounds.length
+  })
+}
+
+function removeRuntimeInbound(index) {
+  runtimeForm.value.inbounds.splice(index, 1)
+}
+
+async function submitRuntime() {
+  runtimeError.value = ''
+  runtimeSuccess.value = ''
+  if (!runtimeForm.value.oldUsername || !runtimeForm.value.oldPassword) {
+    runtimeError.value = '请填写当前用户名和当前密码'
+    return
+  }
+  const error = validateRuntime()
+  if (error) {
+    runtimeError.value = error
+    return
+  }
+
+  runtimeSaving.value = true
+  try {
+    const result = await authStore.saveRuntimeSetup({
+      oldUsername: runtimeForm.value.oldUsername,
+      oldPassword: runtimeForm.value.oldPassword,
+      api: runtimeApiPayload(),
+      inbounds: runtimeInboundPayload()
+    })
+    runtimeSuccess.value = result.requiresRestart ? '配置已保存，请重启后端服务生效。' : '配置已保存。'
+    runtimeForm.value.oldPassword = ''
+    runtimeForm.value.inbounds.forEach(inbound => { inbound.password = '' })
+    await loadData()
+  } catch (e) {
+    runtimeError.value = e.response?.data?.error || '保存入站配置失败'
+  } finally {
+    runtimeSaving.value = false
+  }
+}
+
+function validateRuntime() {
+  const apiPort = Number(runtimeForm.value.api.port || 8080)
+  if (apiPort < 1 || apiPort > 65535) return 'API 端口必须在 1-65535 之间'
+  if (!runtimeForm.value.inbounds.some(inbound => inbound.enabled)) return '至少需要启用一个入站端口'
+  const ports = new Set()
+  for (const inbound of runtimeForm.value.inbounds) {
+    const port = Number(inbound.port)
+    if (port < 1 || port > 65535) return '入站端口必须在 1-65535 之间'
+    if (ports.has(port)) return `入站端口不能重复：${port}`
+    ports.add(port)
+    if (inbound.enabled && port === apiPort) return 'API 端口不能和启用的入站端口相同'
+    if (inbound.authEnabled && !inbound.username) return '启用 SOCKS5 认证时必须填写用户名'
+  }
+  return ''
+}
+
+function runtimeApiPayload() {
+  return {
+    address: runtimeForm.value.api.address || '127.0.0.1',
+    port: Number(runtimeForm.value.api.port || 8080)
+  }
+}
+
+function runtimeInboundPayload() {
+  return runtimeForm.value.inbounds.map(inbound => ({
+    id: inbound.id,
+    nickname: inbound.nickname,
+    port: Number(inbound.port),
+    enabled: Boolean(inbound.enabled),
+    authEnabled: Boolean(inbound.authEnabled),
+    username: inbound.username,
+    password: inbound.password
+  }))
 }
 
 async function openDatabaseDialog() {
@@ -1267,6 +1483,10 @@ th {
   overflow: hidden;
 }
 
+.wide-modal {
+  width: min(760px, 100%);
+}
+
 .modal-head,
 .modal-actions {
   display: flex;
@@ -1290,6 +1510,8 @@ th {
   display: grid;
   gap: 14px;
   padding: 20px;
+  max-height: min(72vh, 760px);
+  overflow: auto;
 }
 
 .field {
@@ -1342,6 +1564,40 @@ th {
   background: #ffffff;
   color: #15352f;
   box-shadow: 0 8px 20px rgba(24, 44, 38, 0.08);
+}
+
+.runtime-head,
+.runtime-inbound-head,
+.toggle-row {
+  display: flex;
+  align-items: center;
+}
+
+.runtime-head,
+.runtime-inbound-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.runtime-inbound {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e1ece8;
+  border-radius: 8px;
+  background: #fbfefd;
+}
+
+.toggle-row {
+  gap: 8px;
+  color: #47625b;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.danger-btn {
+  border-color: #fecdd3;
+  color: #be123c;
 }
 
 .form-message {

@@ -27,6 +27,11 @@ export const useAuthStore = defineStore('auth', () => {
     return res.data
   }
 
+  async function saveRuntimeSetup(form) {
+    const res = await api.post('/setup/runtime', form)
+    return res.data
+  }
+
   function setSession(nextToken, nextUsername) {
     token.value = nextToken
     username.value = nextUsername
@@ -58,6 +63,7 @@ export const useAuthStore = defineStore('auth', () => {
     changeCredentials,
     setupStatus,
     saveDatabaseSetup,
+    saveRuntimeSetup,
     refreshMe,
     logout,
     isLoggedIn

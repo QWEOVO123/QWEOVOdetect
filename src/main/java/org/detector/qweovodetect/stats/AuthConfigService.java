@@ -12,6 +12,9 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
 @Service
 public class AuthConfigService {
@@ -47,6 +50,14 @@ public class AuthConfigService {
         return getConfig().database();
     }
 
+    public synchronized ApiConfig currentApi() {
+        return getConfig().api();
+    }
+
+    public synchronized List<InboundConfig> currentInbounds() {
+        return getConfig().inbounds();
+    }
+
     public synchronized boolean isFirstStartup() {
         return getConfig().firstStartup();
     }
@@ -73,7 +84,20 @@ public class AuthConfigService {
     }
 
     public synchronized DatabaseConfig saveDatabase(DatabaseConfig database, AuthConfig initialAuth, boolean finishFirstStartup) {
+        return saveRuntimeConfig(database, null, null, initialAuth, finishFirstStartup).database();
+    }
+
+    public synchronized AppConfig saveRuntimeConfig(DatabaseConfig database,
+                                                    ApiConfig api,
+                                                    List<InboundUpdate> inboundUpdates,
+                                                    AuthConfig initialAuth,
+                                                    boolean finishFirstStartup) {
         DatabaseConfig normalized = normalizeDatabase(database);
+        ApiConfig normalizedApi = api == null ? getConfig().api() : normalizeApi(api);
+        List<InboundConfig> normalizedInbounds = inboundUpdates == null
+                ? getConfig().inbounds()
+                : normalizeInbounds(inboundUpdates, getConfig().inbounds());
+        validateRuntimePorts(normalizedApi, normalizedInbounds);
         AppConfig current = getConfig();
         AuthConfig nextAuth = current.auth();
         if (current.firstStartup()) {
@@ -89,9 +113,11 @@ public class AuthConfigService {
         cachedConfig = new AppConfig(
                 finishFirstStartup ? false : current.firstStartup(),
                 nextAuth,
-                normalized);
+                normalized,
+                normalizedApi,
+                normalizedInbounds);
         write(cachedConfig);
-        return normalized;
+        return cachedConfig;
     }
 
     public void validateDatabaseConnection(DatabaseConfig database) {
@@ -130,9 +156,10 @@ public class AuthConfigService {
         if (Files.exists(CONFIG_PATH)) {
             try {
                 JsonNode root = objectMapper.readTree(CONFIG_PATH.toFile());
-                AppConfig config = parseConfig(root);
+                AppConfig config = normalizeConfig(parseConfig(root));
                 if (isValid(config)) {
-                    if (!root.has("auth") || !root.has("database") || !root.has("firstStartup")) {
+                    if (!root.has("auth") || !root.has("database") || !root.has("firstStartup")
+                            || !root.has("api") || !root.has("inbounds")) {
                         write(config);
                     }
                     return config;
@@ -144,19 +171,41 @@ public class AuthConfigService {
         AppConfig defaultConfig = new AppConfig(
                 true,
                 new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD)),
-                DatabaseConfig.h2Default());
+                DatabaseConfig.h2Default(),
+                ApiConfig.defaultApi(),
+                List.of(InboundConfig.defaultInbound()));
         write(defaultConfig);
         return defaultConfig;
     }
 
     private AppConfig parseConfig(JsonNode root) throws IOException {
         if (root.has("auth")) {
-            return objectMapper.treeToValue(root, AppConfig.class);
+            AppConfig parsed = objectMapper.treeToValue(root, AppConfig.class);
+            return normalizeConfig(parsed);
         }
 
         String username = text(root, "username", PLACEHOLDER_USERNAME);
         String passwordHash = text(root, "passwordHash", passwordEncoder.encode(PLACEHOLDER_PASSWORD));
-        return new AppConfig(true, new AuthConfig(username, passwordHash), DatabaseConfig.h2Default());
+        return new AppConfig(true, new AuthConfig(username, passwordHash),
+                DatabaseConfig.h2Default(), ApiConfig.defaultApi(), List.of(InboundConfig.defaultInbound()));
+    }
+
+    private AppConfig normalizeConfig(AppConfig config) {
+        if (config == null) {
+            return new AppConfig(true,
+                    new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD)),
+                    DatabaseConfig.h2Default(),
+                    ApiConfig.defaultApi(),
+                    List.of(InboundConfig.defaultInbound()));
+        }
+        return new AppConfig(
+                config.firstStartup(),
+                config.auth(),
+                config.database() == null ? DatabaseConfig.h2Default() : normalizeDatabase(config.database()),
+                config.api() == null ? ApiConfig.defaultApi() : normalizeApi(config.api()),
+                config.inbounds() == null || config.inbounds().isEmpty()
+                        ? List.of(InboundConfig.defaultInbound())
+                        : normalizeStoredInbounds(config.inbounds()));
     }
 
     private boolean isValid(AppConfig config) {
@@ -166,7 +215,10 @@ public class AuthConfigService {
                 && !config.auth().username().isBlank()
                 && config.auth().passwordHash() != null
                 && !config.auth().passwordHash().isBlank()
-                && config.database() != null;
+                && config.database() != null
+                && config.api() != null
+                && config.inbounds() != null
+                && !config.inbounds().isEmpty();
     }
 
     private DatabaseConfig normalizeDatabase(DatabaseConfig database) {
@@ -205,6 +257,105 @@ public class AuthConfigService {
                 database.password() == null ? "" : database.password());
     }
 
+    private ApiConfig normalizeApi(ApiConfig api) {
+        int port = api.port() == null ? 8080 : api.port();
+        if (port < 1 || port > 65535) {
+            throw new IllegalArgumentException("API 端口必须在 1-65535 之间");
+        }
+        String address = blankToDefault(api.address(), "127.0.0.1");
+        return new ApiConfig(address, port);
+    }
+
+    private List<InboundConfig> normalizeStoredInbounds(List<InboundConfig> inbounds) {
+        return inbounds.stream().map(inbound -> {
+            int port = inbound.port() == null ? 1080 : inbound.port();
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("入站端口必须在 1-65535 之间");
+            }
+            boolean authEnabled = inbound.authEnabled();
+            String username = inbound.username() == null ? "" : inbound.username().trim();
+            String passwordHash = inbound.passwordHash() == null ? "" : inbound.passwordHash();
+            if (authEnabled && (username.isBlank() || passwordHash.isBlank())) {
+                throw new IllegalArgumentException("启用 SOCKS5 认证时必须配置用户名和密码");
+            }
+            return new InboundConfig(
+                    blankToDefault(inbound.id(), UUID.randomUUID().toString()),
+                    blankToDefault(inbound.nickname(), "入站 " + port),
+                    port,
+                    inbound.enabled(),
+                    authEnabled,
+                    username,
+                    passwordHash);
+        }).toList();
+    }
+
+    private List<InboundConfig> normalizeInbounds(List<InboundUpdate> updates, List<InboundConfig> previous) {
+        if (updates == null || updates.isEmpty()) {
+            throw new IllegalArgumentException("至少需要配置一个入站端口");
+        }
+
+        List<InboundConfig> result = new ArrayList<>();
+        for (InboundUpdate update : updates) {
+            int port = update.port() == null ? 1080 : update.port();
+            if (port < 1 || port > 65535) {
+                throw new IllegalArgumentException("入站端口必须在 1-65535 之间");
+            }
+            if (result.stream().anyMatch(inbound -> inbound.port() == port)) {
+                throw new IllegalArgumentException("入站端口不能重复：" + port);
+            }
+
+            InboundConfig old = findInbound(previous, update.id(), port);
+            boolean authEnabled = update.authEnabled();
+            String username = update.username() == null ? "" : update.username().trim();
+            String passwordHash = old == null ? "" : old.passwordHash();
+            if (authEnabled) {
+                if (username.isBlank()) {
+                    throw new IllegalArgumentException("启用 SOCKS5 认证时必须配置用户名");
+                }
+                if (update.password() != null && !update.password().isBlank()) {
+                    passwordHash = passwordEncoder.encode(update.password());
+                }
+                if (passwordHash.isBlank()) {
+                    throw new IllegalArgumentException("启用 SOCKS5 认证时必须配置密码");
+                }
+            } else {
+                username = "";
+                passwordHash = "";
+            }
+
+            result.add(new InboundConfig(
+                    blankToDefault(update.id(), UUID.randomUUID().toString()),
+                    blankToDefault(update.nickname(), "入站 " + port),
+                    port,
+                    update.enabled(),
+                    authEnabled,
+                    username,
+                    passwordHash));
+        }
+        return result;
+    }
+
+    private void validateRuntimePorts(ApiConfig api, List<InboundConfig> inbounds) {
+        if (inbounds.stream().noneMatch(InboundConfig::enabled)) {
+            throw new IllegalArgumentException("至少需要启用一个入站端口");
+        }
+        for (InboundConfig inbound : inbounds) {
+            if (inbound.enabled() && inbound.port().equals(api.port())) {
+                throw new IllegalArgumentException("API 端口不能和已启用入站端口相同：" + api.port());
+            }
+        }
+    }
+
+    private InboundConfig findInbound(List<InboundConfig> previous, String id, int port) {
+        if (previous == null) {
+            return null;
+        }
+        return previous.stream()
+                .filter(inbound -> (id != null && id.equals(inbound.id())) || inbound.port() == port)
+                .findFirst()
+                .orElse(null);
+    }
+
     private String text(JsonNode node, String field, String fallback) {
         JsonNode value = node.get(field);
         return value == null || value.isNull() ? fallback : value.asText(fallback);
@@ -229,9 +380,13 @@ public class AuthConfigService {
         }
     }
 
-    public record AppConfig(boolean firstStartup, AuthConfig auth, DatabaseConfig database) {
+    public record AppConfig(boolean firstStartup,
+                            AuthConfig auth,
+                            DatabaseConfig database,
+                            ApiConfig api,
+                            List<InboundConfig> inbounds) {
         public AppConfig withAuth(AuthConfig nextAuth) {
-            return new AppConfig(firstStartup, nextAuth, database);
+            return new AppConfig(firstStartup, nextAuth, database, api, inbounds);
         }
     }
 
@@ -248,5 +403,32 @@ public class AuthConfigService {
         public static DatabaseConfig h2Default() {
             return new DatabaseConfig("H2", "./data/socks5_stats", null, null, null, null, null);
         }
+    }
+
+    public record ApiConfig(String address, Integer port) {
+        public static ApiConfig defaultApi() {
+            return new ApiConfig("127.0.0.1", 8080);
+        }
+    }
+
+    public record InboundConfig(String id,
+                                String nickname,
+                                Integer port,
+                                boolean enabled,
+                                boolean authEnabled,
+                                String username,
+                                String passwordHash) {
+        public static InboundConfig defaultInbound() {
+            return new InboundConfig(UUID.randomUUID().toString(), "默认入站", 1080, true, false, "", "");
+        }
+    }
+
+    public record InboundUpdate(String id,
+                                String nickname,
+                                Integer port,
+                                boolean enabled,
+                                boolean authEnabled,
+                                String username,
+                                String password) {
     }
 }

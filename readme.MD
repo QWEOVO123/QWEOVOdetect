@@ -6,7 +6,8 @@ QWEOVOdetect - 开源的 SOCKS5 代理审计与滥用检测系统，保护你的
 
 - SOCKS5 TCP CONNECT 转发
 - SOCKS5 UDP ASSOCIATE 原生 UDP 转发
-- 1080-1090 多端口监听，每个端口独立统计
+- 可配置 SOCKS5 入站端口，每个端口独立统计
+- 每个 SOCKS5 入站可配置昵称、启用状态和用户名密码认证
 - 支持 Proxy Protocol 获取真实客户端 IP
 - HTTP Host 检测
 - TLS SNI 检测和统计
@@ -36,7 +37,7 @@ QWEOVOdetect/
 
 ## 后端模块说明
 
-- `Socks5Server`：启动 SOCKS5 监听服务，默认监听 `1080-1090`。
+- `Socks5Server`：按 `cfg` 中的入站配置启动 SOCKS5 监听服务。
 - `Socks5Handler`：处理 SOCKS5 握手、CONNECT、UDP ASSOCIATE 和 Proxy Protocol。
 - `RelayHandler`：TCP 双向转发，同时对客户端方向流量进行 DPI 和封禁判断。
 - `UdpRelayHandler`：原生 UDP 转发，并对客户端方向 QUIC Initial 尝试解析 SNI。
@@ -55,6 +56,8 @@ QWEOVOdetect/
 - 首次启动状态
 - 登录用户名和密码哈希
 - 数据库类型和连接配置
+- API 监听地址和端口
+- SOCKS5 入站端口、昵称、启用状态和认证配置
 
 主要数据表包括：
 
@@ -102,7 +105,7 @@ qweovo-front/
 
 主要展示：
 
-- 1080-1090 端口维度统计
+- 可配置入站端口维度统计
 - 客户端访问概览
 - HTTP / TLS / QUIC SNI 统计
 - QUIC 标记
@@ -136,9 +139,11 @@ http://localhost:5173
 后端默认监听：
 
 ```text
-SOCKS5: 127.0.0.1:1080-1090
+SOCKS5: 由 cfg 中的入站配置决定，首次默认 1080
 API:    127.0.0.1:8080
 ```
+
+API 端口和 SOCKS5 入站端口都可以在前端配置，保存后需要重启后端服务生效。
 
 ## 构建
 

@@ -35,6 +35,56 @@
         <input v-model="initialAuth.confirmPassword" type="password" autocomplete="new-password" placeholder="请再次输入密码" />
       </label>
 
+      <div class="setup-section">
+        <div class="setup-section-head">
+          <strong>API 端口</strong>
+          <span>保存后重启生效</span>
+        </div>
+        <label class="field">
+          <span>API 监听端口</span>
+          <input v-model.number="apiForm.port" type="number" min="1" max="65535" placeholder="8080" />
+        </label>
+      </div>
+
+      <div class="setup-section">
+        <div class="setup-section-head">
+          <strong>SOCKS5 入站</strong>
+          <button type="button" class="mini-btn" @click="addInbound">添加入站</button>
+        </div>
+        <div v-for="(inbound, index) in inboundForms" :key="inbound.id || index" class="inbound-card">
+          <div class="inbound-card-head">
+            <strong>入站 {{ index + 1 }}</strong>
+            <button v-if="inboundForms.length > 1" type="button" class="mini-btn danger" @click="removeInbound(index)">删除</button>
+          </div>
+          <label class="field">
+            <span>昵称</span>
+            <input v-model="inbound.nickname" placeholder="默认入站" />
+          </label>
+          <label class="field">
+            <span>监听端口</span>
+            <input v-model.number="inbound.port" type="number" min="1" max="65535" placeholder="1080" />
+          </label>
+          <label class="check-row">
+            <input v-model="inbound.enabled" type="checkbox" />
+            <span>启用这个入站</span>
+          </label>
+          <label class="check-row">
+            <input v-model="inbound.authEnabled" type="checkbox" />
+            <span>启用 SOCKS5 用户名密码认证</span>
+          </label>
+          <template v-if="inbound.authEnabled">
+            <label class="field">
+              <span>SOCKS5 用户名</span>
+              <input v-model="inbound.username" autocomplete="username" />
+            </label>
+            <label class="field">
+              <span>SOCKS5 密码</span>
+              <input v-model="inbound.password" type="password" autocomplete="new-password" />
+            </label>
+          </template>
+        </div>
+      </div>
+
       <div class="segment">
         <button :class="{ active: dbForm.type === 'H2' }" @click="dbForm.type = 'H2'">H2</button>
         <button :class="{ active: dbForm.type === 'MYSQL' }" @click="dbForm.type = 'MYSQL'">MySQL</button>
@@ -138,16 +188,66 @@ const dbForm = ref({
   username: '',
   password: ''
 })
+const apiForm = ref({
+  address: '127.0.0.1',
+  port: 8080
+})
+const inboundForms = ref([newInbound()])
 
 onMounted(async () => {
   try {
     const status = await authStore.setupStatus()
     setupMode.value = Boolean(status.firstStartup)
     applyDatabase(status.database)
+    applyRuntime(status)
   } catch (e) {
     setupMode.value = false
   }
 })
+
+function newInbound() {
+  return {
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+    nickname: '默认入站',
+    port: 1080,
+    enabled: true,
+    authEnabled: false,
+    username: '',
+    password: ''
+  }
+}
+
+function addInbound() {
+  inboundForms.value.push({
+    ...newInbound(),
+    nickname: `入站 ${inboundForms.value.length + 1}`,
+    port: 1080 + inboundForms.value.length
+  })
+}
+
+function removeInbound(index) {
+  inboundForms.value.splice(index, 1)
+}
+
+function applyRuntime(status) {
+  if (status.api) {
+    apiForm.value = {
+      address: status.api.address || '127.0.0.1',
+      port: status.api.port || 8080
+    }
+  }
+  if (Array.isArray(status.inbounds) && status.inbounds.length) {
+    inboundForms.value = status.inbounds.map(inbound => ({
+      id: inbound.id,
+      nickname: inbound.nickname || `入站 ${inbound.port || 1080}`,
+      port: inbound.port || 1080,
+      enabled: inbound.enabled !== false,
+      authEnabled: Boolean(inbound.authEnabled),
+      username: inbound.username || '',
+      password: ''
+    }))
+  }
+}
 
 function applyDatabase(database) {
   if (!database) return
@@ -180,12 +280,20 @@ async function saveSetup() {
     return
   }
 
+  const inboundError = validateInbounds()
+  if (inboundError) {
+    error.value = inboundError
+    return
+  }
+
   setupSaving.value = true
   try {
     const result = await authStore.saveDatabaseSetup({
       initialUsername: initialAuth.value.username,
       initialPassword: initialAuth.value.password,
-      database: dbPayload()
+      database: dbPayload(),
+      api: apiPayload(),
+      inbounds: inboundPayload()
     })
     setupRequiresRestart.value = result.requiresRestart
     setupMessage.value = result.requiresRestart
@@ -215,6 +323,51 @@ function dbPayload() {
     username: dbForm.value.username,
     password: dbForm.value.password
   }
+}
+
+function validateInbounds() {
+  if (!apiForm.value.port || apiForm.value.port < 1 || apiForm.value.port > 65535) {
+    return 'API 端口必须在 1-65535 之间'
+  }
+  if (!inboundForms.value.some(inbound => inbound.enabled)) {
+    return '至少需要启用一个入站端口'
+  }
+  const ports = new Set()
+  for (const inbound of inboundForms.value) {
+    if (!inbound.port || inbound.port < 1 || inbound.port > 65535) {
+      return '入站端口必须在 1-65535 之间'
+    }
+    if (ports.has(Number(inbound.port))) {
+      return `入站端口不能重复：${inbound.port}`
+    }
+    ports.add(Number(inbound.port))
+    if (inbound.enabled && Number(inbound.port) === Number(apiForm.value.port)) {
+      return 'API 端口不能和启用的入站端口相同'
+    }
+    if (inbound.authEnabled && (!inbound.username || !inbound.password)) {
+      return '启用 SOCKS5 认证时必须填写用户名和密码'
+    }
+  }
+  return ''
+}
+
+function apiPayload() {
+  return {
+    address: apiForm.value.address || '127.0.0.1',
+    port: Number(apiForm.value.port || 8080)
+  }
+}
+
+function inboundPayload() {
+  return inboundForms.value.map(inbound => ({
+    id: inbound.id,
+    nickname: inbound.nickname,
+    port: Number(inbound.port),
+    enabled: Boolean(inbound.enabled),
+    authEnabled: Boolean(inbound.authEnabled),
+    username: inbound.username,
+    password: inbound.password
+  }))
 }
 
 async function handleLogin() {
@@ -369,6 +522,74 @@ async function handleLogin() {
   background: #ffffff;
   color: #15352f;
   box-shadow: 0 8px 20px rgba(24, 44, 38, 0.08);
+}
+
+.setup-section {
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid #dbe8e3;
+  border-radius: 8px;
+  background: rgba(250, 253, 252, 0.82);
+}
+
+.setup-section-head,
+.inbound-card-head,
+.check-row {
+  display: flex;
+  align-items: center;
+}
+
+.setup-section-head,
+.inbound-card-head {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.setup-section-head strong,
+.inbound-card-head strong {
+  color: #203a34;
+}
+
+.setup-section-head span {
+  color: #78908a;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.inbound-card {
+  padding: 12px;
+  border: 1px solid #e4eeea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.inbound-card + .inbound-card {
+  margin-top: 10px;
+}
+
+.mini-btn {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #cfddd8;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #24443d;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.mini-btn.danger {
+  border-color: #fecdd3;
+  color: #be123c;
+}
+
+.check-row {
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #47625b;
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .field {
