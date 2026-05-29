@@ -164,6 +164,7 @@ npm.cmd run build
 ## 说明
 
 本项目偏向本地研究、检测与可视化用途。UDP 转发为 SOCKS5 原生 UDP relay；普通 UDP 包正常转发，QUIC Initial 会尝试解析 SNI 用于统计和封禁。Trojan 检测作用于 TCP relay 流量。
+如果需要获取真实IP，需要自己对Xray核心进行魔改，在Socks5出站实现的tcp建立后S5协议握手前执行proxy protocol来透传用户真实IP地址
 
 ## License
 
