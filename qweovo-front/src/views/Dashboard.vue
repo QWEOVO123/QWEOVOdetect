@@ -75,25 +75,40 @@
         <div class="panel-head">
           <div>
             <p class="eyebrow">Block List</p>
-            <h3>域名关键词封禁</h3>
+            <h3>封禁规则</h3>
           </div>
           <span class="hint">{{ blockRules.length }} 条规则</span>
         </div>
+        <div class="block-group-title">域名关键词封禁</div>
         <form class="block-form" @submit.prevent="addBlockRule">
           <input v-model="blockKeyword" placeholder="输入关键词，例如 tiktok" maxlength="128" />
           <button class="primary-btn" :disabled="blockSaving">{{ blockSaving ? '提交中' : '提交封禁' }}</button>
         </form>
+        <div class="block-group-title">目标 IP 地址封禁</div>
+        <form class="block-form" @submit.prevent="addTargetIpBlockRule">
+          <input v-model="targetIpKeyword" placeholder="输入目标 IP，例如 8.8.8.8" maxlength="128" />
+          <button class="primary-btn" :disabled="blockSaving">{{ blockSaving ? '提交中' : '封禁目标 IP' }}</button>
+        </form>
         <p v-if="blockError" class="form-message error-message">{{ blockError }}</p>
-        <div v-if="blockRules.length" class="block-list">
-          <span v-for="rule in blockRules" :key="rule.id" class="block-chip" :class="{ disabled: !rule.enabled }">
+        <div v-if="domainBlockRules.length" class="block-list">
+          <span v-for="rule in domainBlockRules" :key="rule.id" class="block-chip" :class="{ disabled: !rule.enabled }">
+            <em>域名</em>
             <b>{{ rule.keyword }}</b>
             <button type="button" @click="toggleBlockRule(rule)">{{ rule.enabled ? '停用' : '启用' }}</button>
             <button type="button" @click="deleteBlockRule(rule)">删除</button>
           </span>
         </div>
-        <div v-else class="empty-state compact">
-          <strong>暂无封禁关键词</strong>
-          <span>命中 HTTP Host、TLS SNI 或 QUIC SNI 后会自动阻断。</span>
+        <div v-if="targetIpBlockRules.length" class="block-list">
+          <span v-for="rule in targetIpBlockRules" :key="rule.id" class="block-chip ip-chip" :class="{ disabled: !rule.enabled }">
+            <em>目标 IP</em>
+            <b>{{ rule.keyword }}</b>
+            <button type="button" @click="toggleBlockRule(rule)">{{ rule.enabled ? '停用' : '启用' }}</button>
+            <button type="button" @click="deleteBlockRule(rule)">删除</button>
+          </span>
+        </div>
+        <div v-if="!blockRules.length" class="empty-state compact">
+          <strong>暂无封禁规则</strong>
+          <span>域名命中 HTTP Host、TLS SNI 或 QUIC SNI 后阻断；目标 IP 命中远端地址后阻断。</span>
         </div>
       </section>
 
@@ -449,6 +464,7 @@ const highRisk = ref([])
 const portSummary = ref([])
 const blockRules = ref([])
 const blockKeyword = ref('')
+const targetIpKeyword = ref('')
 const blockSaving = ref(false)
 const blockError = ref('')
 const nowTime = ref('')
@@ -504,6 +520,14 @@ const metrics = computed(() => [
   { label: 'Trojan 命中', value: trojanTotal.value, icon: 'TR', tone: 'tone-red' },
   { label: '高危目标', value: riskCount.value, icon: 'HI', tone: 'tone-purple' }
 ])
+
+const domainBlockRules = computed(() =>
+  blockRules.value.filter(rule => String(rule.category || 'DOMAIN').toUpperCase() === 'DOMAIN')
+)
+
+const targetIpBlockRules = computed(() =>
+  blockRules.value.filter(rule => String(rule.category || '').toUpperCase() === 'TARGET_IP')
+)
 
 const greeting = computed(() => {
   const h = new Date().getHours()
@@ -584,6 +608,26 @@ async function addBlockRule() {
     await loadBlockRules()
   } catch (e) {
     blockError.value = e.response?.data?.message || '封禁规则提交失败'
+  } finally {
+    blockSaving.value = false
+  }
+}
+
+async function addTargetIpBlockRule() {
+  blockError.value = ''
+  const ip = targetIpKeyword.value.trim()
+  if (!ip) {
+    blockError.value = '请输入要封禁的目标 IP 地址'
+    return
+  }
+
+  blockSaving.value = true
+  try {
+    await api.post('/block-rules/target-ip', { ip })
+    targetIpKeyword.value = ''
+    await loadBlockRules()
+  } catch (e) {
+    blockError.value = e.response?.data?.message || '目标 IP 封禁规则提交失败'
   } finally {
     blockSaving.value = false
   }
@@ -1120,6 +1164,13 @@ onUnmounted(() => {
   padding: 0 16px 12px;
 }
 
+.block-group-title {
+  padding: 0 16px 8px;
+  color: #47625b;
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .block-form input {
   min-width: 0;
   height: 38px;
@@ -1148,6 +1199,21 @@ onUnmounted(() => {
   border-radius: 8px;
   background: #fff1f2;
   color: #9f1239;
+}
+
+.block-chip em {
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.86);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ip-chip {
+  border-color: rgba(79, 70, 229, 0.18);
+  background: #eef2ff;
+  color: #4338ca;
 }
 
 .block-chip.disabled {

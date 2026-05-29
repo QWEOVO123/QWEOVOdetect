@@ -14,6 +14,7 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 @Service
@@ -62,6 +63,10 @@ public class AuthConfigService {
         return getConfig().firstStartup();
     }
 
+    public synchronized boolean isPendingRestart() {
+        return getConfig().pendingRestart();
+    }
+
     public synchronized AuthConfig changeCredentials(String oldUsername,
                                                      String oldPassword,
                                                      String newUsername,
@@ -92,6 +97,25 @@ public class AuthConfigService {
                                                     List<InboundUpdate> inboundUpdates,
                                                     AuthConfig initialAuth,
                                                     boolean finishFirstStartup) {
+        AppConfig next = buildRuntimeConfig(database, api, inboundUpdates, initialAuth, finishFirstStartup);
+        cachedConfig = next;
+        write(cachedConfig);
+        return cachedConfig;
+    }
+
+    public synchronized AppConfig previewRuntimeConfig(DatabaseConfig database,
+                                                       ApiConfig api,
+                                                       List<InboundUpdate> inboundUpdates,
+                                                       AuthConfig initialAuth,
+                                                       boolean finishFirstStartup) {
+        return buildRuntimeConfig(database, api, inboundUpdates, initialAuth, finishFirstStartup);
+    }
+
+    private AppConfig buildRuntimeConfig(DatabaseConfig database,
+                                         ApiConfig api,
+                                         List<InboundUpdate> inboundUpdates,
+                                         AuthConfig initialAuth,
+                                         boolean finishFirstStartup) {
         DatabaseConfig normalized = normalizeDatabase(database);
         ApiConfig normalizedApi = api == null ? getConfig().api() : normalizeApi(api);
         List<InboundConfig> normalizedInbounds = inboundUpdates == null
@@ -110,14 +134,16 @@ public class AuthConfigService {
             }
             nextAuth = new AuthConfig(initialAuth.username().trim(), passwordEncoder.encode(initialAuth.passwordHash()));
         }
-        cachedConfig = new AppConfig(
+        return new AppConfig(
                 finishFirstStartup ? false : current.firstStartup(),
+                current.pendingRestart()
+                        || finishFirstStartup
+                        || !sameDatabaseConfig(current.database(), normalized)
+                        || !sameApiConfig(current.api(), normalizedApi),
                 nextAuth,
                 normalized,
                 normalizedApi,
                 normalizedInbounds);
-        write(cachedConfig);
-        return cachedConfig;
     }
 
     public void validateDatabaseConnection(DatabaseConfig database) {
@@ -158,8 +184,12 @@ public class AuthConfigService {
                 JsonNode root = objectMapper.readTree(CONFIG_PATH.toFile());
                 AppConfig config = normalizeConfig(parseConfig(root));
                 if (isValid(config)) {
+                    if (config.pendingRestart()) {
+                        config = config.withPendingRestart(false);
+                        write(config);
+                    }
                     if (!root.has("auth") || !root.has("database") || !root.has("firstStartup")
-                            || !root.has("api") || !root.has("inbounds")) {
+                            || !root.has("pendingRestart") || !root.has("api") || !root.has("inbounds")) {
                         write(config);
                     }
                     return config;
@@ -170,6 +200,7 @@ public class AuthConfigService {
 
         AppConfig defaultConfig = new AppConfig(
                 true,
+                false,
                 new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD)),
                 DatabaseConfig.h2Default(),
                 ApiConfig.defaultApi(),
@@ -186,13 +217,14 @@ public class AuthConfigService {
 
         String username = text(root, "username", PLACEHOLDER_USERNAME);
         String passwordHash = text(root, "passwordHash", passwordEncoder.encode(PLACEHOLDER_PASSWORD));
-        return new AppConfig(true, new AuthConfig(username, passwordHash),
+        return new AppConfig(true, false, new AuthConfig(username, passwordHash),
                 DatabaseConfig.h2Default(), ApiConfig.defaultApi(), List.of(InboundConfig.defaultInbound()));
     }
 
     private AppConfig normalizeConfig(AppConfig config) {
         if (config == null) {
             return new AppConfig(true,
+                    false,
                     new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD)),
                     DatabaseConfig.h2Default(),
                     ApiConfig.defaultApi(),
@@ -200,6 +232,7 @@ public class AuthConfigService {
         }
         return new AppConfig(
                 config.firstStartup(),
+                config.pendingRestart(),
                 config.auth(),
                 config.database() == null ? DatabaseConfig.h2Default() : normalizeDatabase(config.database()),
                 config.api() == null ? ApiConfig.defaultApi() : normalizeApi(config.api()),
@@ -267,11 +300,16 @@ public class AuthConfigService {
     }
 
     private List<InboundConfig> normalizeStoredInbounds(List<InboundConfig> inbounds) {
+        List<Integer> ports = new ArrayList<>();
         return inbounds.stream().map(inbound -> {
             int port = inbound.port() == null ? 1080 : inbound.port();
             if (port < 1 || port > 65535) {
                 throw new IllegalArgumentException("入站端口必须在 1-65535 之间");
             }
+            if (ports.contains(port)) {
+                throw new IllegalArgumentException("入站端口不能重复：" + port);
+            }
+            ports.add(port);
             boolean authEnabled = inbound.authEnabled();
             String username = inbound.username() == null ? "" : inbound.username().trim();
             String passwordHash = inbound.passwordHash() == null ? "" : inbound.passwordHash();
@@ -346,6 +384,23 @@ public class AuthConfigService {
         }
     }
 
+    private boolean sameDatabaseConfig(DatabaseConfig left, DatabaseConfig right) {
+        return left != null && right != null
+                && Objects.equals(left.type(), right.type())
+                && Objects.equals(left.path(), right.path())
+                && Objects.equals(left.host(), right.host())
+                && Objects.equals(left.port(), right.port())
+                && Objects.equals(left.databaseName(), right.databaseName())
+                && Objects.equals(left.username(), right.username())
+                && Objects.equals(left.password(), right.password());
+    }
+
+    private boolean sameApiConfig(ApiConfig left, ApiConfig right) {
+        return left != null && right != null
+                && Objects.equals(left.address(), right.address())
+                && Objects.equals(left.port(), right.port());
+    }
+
     private InboundConfig findInbound(List<InboundConfig> previous, String id, int port) {
         if (previous == null) {
             return null;
@@ -381,12 +436,17 @@ public class AuthConfigService {
     }
 
     public record AppConfig(boolean firstStartup,
+                            boolean pendingRestart,
                             AuthConfig auth,
                             DatabaseConfig database,
                             ApiConfig api,
                             List<InboundConfig> inbounds) {
         public AppConfig withAuth(AuthConfig nextAuth) {
-            return new AppConfig(firstStartup, nextAuth, database, api, inbounds);
+            return new AppConfig(firstStartup, pendingRestart, nextAuth, database, api, inbounds);
+        }
+
+        public AppConfig withPendingRestart(boolean nextPendingRestart) {
+            return new AppConfig(firstStartup, nextPendingRestart, auth, database, api, inbounds);
         }
     }
 

@@ -1,5 +1,6 @@
 package org.detector.qweovodetect.stats;
 
+import org.detector.qweovodetect.server.Socks5Server;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,15 +16,18 @@ import java.util.Map;
 public class SetupController {
 
     private final AuthConfigService authConfigService;
+    private final Socks5Server socks5Server;
 
-    public SetupController(AuthConfigService authConfigService) {
+    public SetupController(AuthConfigService authConfigService, Socks5Server socks5Server) {
         this.authConfigService = authConfigService;
+        this.socks5Server = socks5Server;
     }
 
     @GetMapping("/status")
     public Map<String, Object> status() {
         return Map.of(
                 "firstStartup", authConfigService.isFirstStartup(),
+                "pendingRestart", authConfigService.isPendingRestart(),
                 "database", publicDatabase(authConfigService.currentDatabase()),
                 "api", publicApi(authConfigService.currentApi()),
                 "inbounds", publicInbounds(authConfigService.currentInbounds())
@@ -42,23 +46,33 @@ public class SetupController {
 
             AuthConfigService.DatabaseConfig previous = authConfigService.currentDatabase();
             AuthConfigService.ApiConfig previousApi = authConfigService.currentApi();
-            var previousInbounds = authConfigService.currentInbounds();
             AuthConfigService.AuthConfig initialAuth = null;
             if (firstStartup) {
                 initialAuth = new AuthConfigService.AuthConfig(request.initialUsername(), request.initialPassword());
             }
+            AuthConfigService.AppConfig next = authConfigService.previewRuntimeConfig(
+                    request.database(),
+                    request.api(),
+                    request.inbounds(),
+                    initialAuth,
+                    true);
+            socks5Server.validateReload(next.inbounds());
             AuthConfigService.AppConfig saved = authConfigService.saveRuntimeConfig(
                     request.database(),
                     request.api(),
                     request.inbounds(),
                     initialAuth,
                     true);
-            boolean requiresRestart = !sameDatabase(previous, saved.database())
-                    || !publicApi(previousApi).equals(publicApi(saved.api()))
-                    || !publicInbounds(previousInbounds).equals(publicInbounds(saved.inbounds()));
+            if (!firstStartup) {
+                socks5Server.reload(saved.inbounds());
+            }
+            boolean requiresRestart = firstStartup
+                    || !sameDatabase(previous, saved.database())
+                    || !publicApi(previousApi).equals(publicApi(saved.api()));
 
             return ResponseEntity.ok(Map.of(
                     "firstStartup", false,
+                    "pendingRestart", saved.pendingRestart(),
                     "requiresRestart", requiresRestart,
                     "database", publicDatabase(saved.database()),
                     "api", publicApi(saved.api()),
@@ -77,17 +91,24 @@ public class SetupController {
             }
 
             AuthConfigService.ApiConfig previousApi = authConfigService.currentApi();
-            var previousInbounds = authConfigService.currentInbounds();
+            AuthConfigService.AppConfig next = authConfigService.previewRuntimeConfig(
+                    authConfigService.currentDatabase(),
+                    request.api(),
+                    request.inbounds(),
+                    null,
+                    false);
+            socks5Server.validateReload(next.inbounds());
             AuthConfigService.AppConfig saved = authConfigService.saveRuntimeConfig(
                     authConfigService.currentDatabase(),
                     request.api(),
                     request.inbounds(),
                     null,
                     false);
-            boolean requiresRestart = !publicApi(previousApi).equals(publicApi(saved.api()))
-                    || !publicInbounds(previousInbounds).equals(publicInbounds(saved.inbounds()));
+            socks5Server.reload(saved.inbounds());
+            boolean requiresRestart = !publicApi(previousApi).equals(publicApi(saved.api()));
 
             return ResponseEntity.ok(Map.of(
+                    "pendingRestart", saved.pendingRestart(),
                     "requiresRestart", requiresRestart,
                     "api", publicApi(saved.api()),
                     "inbounds", publicInbounds(saved.inbounds())
