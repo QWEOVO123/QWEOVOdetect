@@ -10,8 +10,12 @@ import io.netty.handler.codec.haproxy.*;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
+import org.detector.qweovodetect.stats.AuthConfigService;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Socks5Handler extends ChannelInboundHandlerAdapter {
@@ -19,16 +23,20 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
     private static final AtomicInteger idGen = new AtomicInteger(0);
     private static final int HANDSHAKE_IDLE_TIMEOUT_SECONDS = 60;
     public static final String HANDSHAKE_IDLE_HANDLER = "handshakeIdle";
+    private static final PasswordEncoder SOCKS_PASSWORD_ENCODER = new BCryptPasswordEncoder();
     private final int listenPort;
+    private final AuthConfigService.InboundConfig inbound;
     private String realClientIp = null;
 
-    public Socks5Handler(int listenPort) {
-        this.listenPort = listenPort;
+    public Socks5Handler(AuthConfigService.InboundConfig inbound) {
+        this.inbound = inbound;
+        this.listenPort = inbound.port();
     }
 
     private enum Stage {
         PROXY_PROTOCOL,
         HANDSHAKE,
+        AUTH,
         REQUEST,
         RELAY
     }
@@ -45,6 +53,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
             switch (stage) {
                 case PROXY_PROTOCOL -> handleProxyProtocol(ctx, buf);
                 case HANDSHAKE -> handleHandshake(ctx, buf);
+                case AUTH -> handleAuth(ctx, buf);
                 case REQUEST -> handleRequest(ctx, buf);
                 case RELAY -> ctx.fireChannelRead(buf.retain());
             }
@@ -132,8 +141,73 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
             return;
         }
 
-        buf.skipBytes(nmethods);
+        boolean supportsNoAuth = false;
+        boolean supportsPassword = false;
+        for (int i = 0; i < nmethods; i++) {
+            byte method = buf.readByte();
+            if (method == 0x00) {
+                supportsNoAuth = true;
+            } else if (method == 0x02) {
+                supportsPassword = true;
+            }
+        }
+
+        if (inbound.authEnabled()) {
+            if (!supportsPassword) {
+                ctx.writeAndFlush(Unpooled.wrappedBuffer(new byte[]{0x05, (byte) 0xff}))
+                        .addListener(ChannelFutureListener.CLOSE);
+                return;
+            }
+            ctx.writeAndFlush(Unpooled.wrappedBuffer(new byte[]{0x05, 0x02}));
+            stage = Stage.AUTH;
+            return;
+        }
+
+        if (!supportsNoAuth) {
+            ctx.writeAndFlush(Unpooled.wrappedBuffer(new byte[]{0x05, (byte) 0xff}))
+                    .addListener(ChannelFutureListener.CLOSE);
+            return;
+        }
+
         ctx.writeAndFlush(Unpooled.wrappedBuffer(new byte[]{0x05, 0x00}));
+        stage = Stage.REQUEST;
+    }
+
+    private void handleAuth(ChannelHandlerContext ctx, ByteBuf buf) {
+        if (buf.readableBytes() < 2) {
+            ctx.close();
+            return;
+        }
+
+        byte ver = buf.readByte();
+        int usernameLength = buf.readByte() & 0xff;
+        if (ver != 0x01 || buf.readableBytes() < usernameLength + 1) {
+            ctx.close();
+            return;
+        }
+
+        byte[] usernameBytes = new byte[usernameLength];
+        buf.readBytes(usernameBytes);
+        int passwordLength = buf.readByte() & 0xff;
+        if (buf.readableBytes() < passwordLength) {
+            ctx.close();
+            return;
+        }
+
+        byte[] passwordBytes = new byte[passwordLength];
+        buf.readBytes(passwordBytes);
+        String username = new String(usernameBytes, StandardCharsets.UTF_8);
+        String password = new String(passwordBytes, StandardCharsets.UTF_8);
+
+        boolean ok = inbound.username().equals(username)
+                && SOCKS_PASSWORD_ENCODER.matches(password, inbound.passwordHash());
+        if (!ok) {
+            ctx.writeAndFlush(Unpooled.wrappedBuffer(new byte[]{0x01, 0x01}))
+                    .addListener(ChannelFutureListener.CLOSE);
+            return;
+        }
+
+        ctx.writeAndFlush(Unpooled.wrappedBuffer(new byte[]{0x01, 0x00}));
         stage = Stage.REQUEST;
     }
 
