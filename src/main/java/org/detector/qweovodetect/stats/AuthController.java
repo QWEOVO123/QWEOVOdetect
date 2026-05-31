@@ -65,6 +65,9 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<?> me(@RequestHeader("Authorization") String auth) {
         String token = auth.replace("Bearer ", "");
+        if (!jwtUtil.validateToken(token)) {
+            return ResponseEntity.status(401).body(Map.of("error", "Token 已失效"));
+        }
         String username = jwtUtil.getUsername(token);
         return ResponseEntity.ok(Map.of("username", username));
     }

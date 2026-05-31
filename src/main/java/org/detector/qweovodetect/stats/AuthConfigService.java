@@ -9,10 +9,12 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -23,6 +25,7 @@ public class AuthConfigService {
     private static final Path CONFIG_PATH = Path.of("cfg");
     private static final String PLACEHOLDER_USERNAME = "admin";
     private static final String PLACEHOLDER_PASSWORD = "password";
+    private static final int JWT_SECRET_BYTES = 32;
 
     private final ObjectMapper objectMapper;
     private final PasswordEncoder passwordEncoder;
@@ -67,6 +70,19 @@ public class AuthConfigService {
         return getConfig().pendingRestart();
     }
 
+    public synchronized String currentJwtSecret() {
+        return getConfig().jwtSecret();
+    }
+
+    public synchronized int currentTokenVersion() {
+        return getConfig().auth().tokenVersion();
+    }
+
+    public synchronized boolean isTokenCurrent(String username, int tokenVersion) {
+        AuthConfig auth = getConfig().auth();
+        return auth.username().equals(username) && auth.tokenVersion() == tokenVersion;
+    }
+
     public synchronized AuthConfig changeCredentials(String oldUsername,
                                                      String oldPassword,
                                                      String newUsername,
@@ -82,7 +98,10 @@ public class AuthConfigService {
         }
 
         AppConfig current = getConfig();
-        AuthConfig nextAuth = new AuthConfig(newUsername.trim(), passwordEncoder.encode(newPassword));
+        AuthConfig nextAuth = new AuthConfig(
+                newUsername.trim(),
+                passwordEncoder.encode(newPassword),
+                current.auth().tokenVersion() + 1);
         cachedConfig = current.withAuth(nextAuth);
         write(cachedConfig);
         return nextAuth;
@@ -132,7 +151,7 @@ public class AuthConfigService {
                     || initialAuth.passwordHash().isBlank()) {
                 throw new IllegalArgumentException("请设置初始用户名和密码");
             }
-            nextAuth = new AuthConfig(initialAuth.username().trim(), passwordEncoder.encode(initialAuth.passwordHash()));
+            nextAuth = new AuthConfig(initialAuth.username().trim(), passwordEncoder.encode(initialAuth.passwordHash()), 0);
         }
         return new AppConfig(
                 finishFirstStartup ? false : current.firstStartup(),
@@ -141,6 +160,7 @@ public class AuthConfigService {
                         || !sameDatabaseConfig(current.database(), normalized)
                         || !sameApiConfig(current.api(), normalizedApi),
                 nextAuth,
+                current.jwtSecret(),
                 normalized,
                 normalizedApi,
                 normalizedInbounds);
@@ -189,7 +209,8 @@ public class AuthConfigService {
                         write(config);
                     }
                     if (!root.has("auth") || !root.has("database") || !root.has("firstStartup")
-                            || !root.has("pendingRestart") || !root.has("api") || !root.has("inbounds")) {
+                            || !root.has("pendingRestart") || !root.has("api") || !root.has("inbounds")
+                            || !root.has("jwtSecret")) {
                         write(config);
                     }
                     return config;
@@ -201,7 +222,8 @@ public class AuthConfigService {
         AppConfig defaultConfig = new AppConfig(
                 true,
                 false,
-                new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD)),
+                new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD), 0),
+                generateJwtSecret(),
                 DatabaseConfig.h2Default(),
                 ApiConfig.defaultApi(),
                 List.of(InboundConfig.defaultInbound()));
@@ -217,7 +239,7 @@ public class AuthConfigService {
 
         String username = text(root, "username", PLACEHOLDER_USERNAME);
         String passwordHash = text(root, "passwordHash", passwordEncoder.encode(PLACEHOLDER_PASSWORD));
-        return new AppConfig(true, false, new AuthConfig(username, passwordHash),
+        return new AppConfig(true, false, new AuthConfig(username, passwordHash, 0), generateJwtSecret(),
                 DatabaseConfig.h2Default(), ApiConfig.defaultApi(), List.of(InboundConfig.defaultInbound()));
     }
 
@@ -225,7 +247,8 @@ public class AuthConfigService {
         if (config == null) {
             return new AppConfig(true,
                     false,
-                    new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD)),
+                    new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD), 0),
+                    generateJwtSecret(),
                     DatabaseConfig.h2Default(),
                     ApiConfig.defaultApi(),
                     List.of(InboundConfig.defaultInbound()));
@@ -233,7 +256,8 @@ public class AuthConfigService {
         return new AppConfig(
                 config.firstStartup(),
                 config.pendingRestart(),
-                config.auth(),
+                normalizeAuth(config.auth()),
+                config.jwtSecret() == null || config.jwtSecret().isBlank() ? generateJwtSecret() : config.jwtSecret(),
                 config.database() == null ? DatabaseConfig.h2Default() : normalizeDatabase(config.database()),
                 config.api() == null ? ApiConfig.defaultApi() : normalizeApi(config.api()),
                 config.inbounds() == null || config.inbounds().isEmpty()
@@ -248,6 +272,8 @@ public class AuthConfigService {
                 && !config.auth().username().isBlank()
                 && config.auth().passwordHash() != null
                 && !config.auth().passwordHash().isBlank()
+                && config.jwtSecret() != null
+                && !config.jwtSecret().isBlank()
                 && config.database() != null
                 && config.api() != null
                 && config.inbounds() != null
@@ -420,6 +446,19 @@ public class AuthConfigService {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
 
+    private AuthConfig normalizeAuth(AuthConfig auth) {
+        if (auth == null) {
+            return new AuthConfig(PLACEHOLDER_USERNAME, passwordEncoder.encode(PLACEHOLDER_PASSWORD), 0);
+        }
+        return new AuthConfig(auth.username(), auth.passwordHash(), Math.max(0, auth.tokenVersion()));
+    }
+
+    private String generateJwtSecret() {
+        byte[] bytes = new byte[JWT_SECRET_BYTES];
+        new SecureRandom().nextBytes(bytes);
+        return Base64.getEncoder().encodeToString(bytes);
+    }
+
     public static String mysqlJdbcUrl(DatabaseConfig database) {
         String host = database.host() == null || database.host().isBlank() ? "127.0.0.1" : database.host();
         int port = database.port() == null ? 3306 : database.port();
@@ -438,19 +477,20 @@ public class AuthConfigService {
     public record AppConfig(boolean firstStartup,
                             boolean pendingRestart,
                             AuthConfig auth,
+                            String jwtSecret,
                             DatabaseConfig database,
                             ApiConfig api,
                             List<InboundConfig> inbounds) {
         public AppConfig withAuth(AuthConfig nextAuth) {
-            return new AppConfig(firstStartup, pendingRestart, nextAuth, database, api, inbounds);
+            return new AppConfig(firstStartup, pendingRestart, nextAuth, jwtSecret, database, api, inbounds);
         }
 
         public AppConfig withPendingRestart(boolean nextPendingRestart) {
-            return new AppConfig(firstStartup, nextPendingRestart, auth, database, api, inbounds);
+            return new AppConfig(firstStartup, nextPendingRestart, auth, jwtSecret, database, api, inbounds);
         }
     }
 
-    public record AuthConfig(String username, String passwordHash) {
+    public record AuthConfig(String username, String passwordHash, int tokenVersion) {
     }
 
     public record DatabaseConfig(String type,

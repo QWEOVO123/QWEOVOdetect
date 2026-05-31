@@ -1,6 +1,9 @@
 package org.detector.qweovodetect.stats;
 
 import org.detector.qweovodetect.server.Socks5Server;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,14 +27,24 @@ public class SetupController {
     }
 
     @GetMapping("/status")
-    public Map<String, Object> status() {
-        return Map.of(
+    public ResponseEntity<?> status() {
+        if (!authConfigService.isFirstStartup() && !isAuthenticated()) {
+            return ResponseEntity.status(401).body(Map.of("error", "unauthorized"));
+        }
+        return ResponseEntity.ok(Map.of(
                 "firstStartup", authConfigService.isFirstStartup(),
                 "pendingRestart", authConfigService.isPendingRestart(),
                 "database", publicDatabase(authConfigService.currentDatabase()),
                 "api", publicApi(authConfigService.currentApi()),
                 "inbounds", publicInbounds(authConfigService.currentInbounds())
-        );
+        ));
+    }
+
+    private boolean isAuthenticated() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null
+                && authentication.isAuthenticated()
+                && !(authentication instanceof AnonymousAuthenticationToken);
     }
 
     @PostMapping("/database")
@@ -48,7 +61,7 @@ public class SetupController {
             AuthConfigService.ApiConfig previousApi = authConfigService.currentApi();
             AuthConfigService.AuthConfig initialAuth = null;
             if (firstStartup) {
-                initialAuth = new AuthConfigService.AuthConfig(request.initialUsername(), request.initialPassword());
+                initialAuth = new AuthConfigService.AuthConfig(request.initialUsername(), request.initialPassword(), 0);
             }
             AuthConfigService.AppConfig next = authConfigService.previewRuntimeConfig(
                     request.database(),
