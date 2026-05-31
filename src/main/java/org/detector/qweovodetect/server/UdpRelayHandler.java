@@ -3,9 +3,11 @@ package org.detector.qweovodetect.server;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramPacket;
+import io.netty.handler.timeout.IdleStateEvent;
 import org.detector.qweovodetect.dpi.QuicSniDpiEngine;
 import org.detector.qweovodetect.dpi.SpringContextHolder;
 import org.detector.qweovodetect.stats.BlockRuleService;
@@ -31,6 +33,8 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
+        tcpChannel.closeFuture().addListener((ChannelFutureListener) ignored -> ctx.channel().close());
+
         InetSocketAddress udpLocal = (InetSocketAddress) ctx.channel().localAddress();
         InetAddress bindAddress = selectReplyAddress(udpLocal);
         ByteBuf reply = Unpooled.buffer();
@@ -229,6 +233,16 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
         tcpChannel.close();
+    }
+
+    @Override
+    public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        if (evt instanceof IdleStateEvent) {
+            System.out.printf("[UDP:%d] idle timeout %s, closing relay%n", listenPort, clientIp);
+            ctx.close();
+            return;
+        }
+        super.userEventTriggered(ctx, evt);
     }
 
     @Override

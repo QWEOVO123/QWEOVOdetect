@@ -40,6 +40,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
         HANDSHAKE,
         AUTH,
         REQUEST,
+        UDP_ASSOCIATE,
         RELAY
     }
 
@@ -57,6 +58,8 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 case HANDSHAKE -> handleHandshake(ctx, buf);
                 case AUTH -> handleAuth(ctx, buf);
                 case REQUEST -> handleRequest(ctx, buf);
+                case UDP_ASSOCIATE -> {
+                }
                 case RELAY -> ctx.fireChannelRead(buf.retain());
             }
 
@@ -303,6 +306,10 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 .handler(new ChannelInitializer<NioDatagramChannel>() {
                     @Override
                     protected void initChannel(NioDatagramChannel ch) {
+                        ch.pipeline().addLast(new IdleStateHandler(
+                                0,
+                                0,
+                                RelayHandler.IDLE_TIMEOUT_SECONDS));
                         ch.pipeline().addLast(new UdpRelayHandler(ctx.channel(), clientIp, listenPort));
                     }
                 });
@@ -311,7 +318,12 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
             if (!f.isSuccess()) {
                 sendReply(ctx, (byte) 0x01);
                 ctx.close();
+                return;
             }
+            if (ctx.pipeline().get(HANDSHAKE_IDLE_HANDLER) != null) {
+                ctx.pipeline().remove(HANDSHAKE_IDLE_HANDLER);
+            }
+            stage = Stage.UDP_ASSOCIATE;
         });
     }
 
@@ -395,7 +407,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
-        if (evt instanceof IdleStateEvent && stage != Stage.RELAY) {
+        if (evt instanceof IdleStateEvent && stage != Stage.RELAY && stage != Stage.UDP_ASSOCIATE) {
             ctx.close();
             return;
         }
