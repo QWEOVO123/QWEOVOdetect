@@ -15,6 +15,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class QuicSniDpiEngine {
 
@@ -22,8 +25,22 @@ public class QuicSniDpiEngine {
     private static final int MAX_PACKETS_PER_FLOW = 8;
     private static final int MAX_CRYPTO_BYTES = 16384;
     private static final long STATE_TTL_MS = 180_000;
+    private static final long CLEANUP_INTERVAL_MS = 60_000;
 
     private static final Map<String, FlowState> states = new ConcurrentHashMap<>();
+    private static final ScheduledExecutorService CLEANUP_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "quic-sni-dpi-cleanup");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    static {
+        CLEANUP_EXECUTOR.scheduleWithFixedDelay(
+                () -> cleanupExpired(System.currentTimeMillis()),
+                CLEANUP_INTERVAL_MS,
+                CLEANUP_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
+    }
 
     public static boolean inspect(ByteBuf payload,
                                   String clientIp,
@@ -437,7 +454,7 @@ public class QuicSniDpiEngine {
 
     private static class FlowState {
         private final ByteArrayOutputStream crypto = new ByteArrayOutputStream();
-        private long lastSeen = System.currentTimeMillis();
+        private volatile long lastSeen = System.currentTimeMillis();
         private int packetCount;
         private boolean finished;
     }
