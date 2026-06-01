@@ -1,5 +1,7 @@
 # QWEOVOdetect
 
+[中文文档](README.zh-CN.md)
+
 **QWEOVOdetect** is an open-source SOCKS5 proxy auditing and abuse detection system. It passively inspects proxy traffic — extracting HTTP Host headers, TLS/QUIC SNI, detecting Shadowsocks-like encrypted tunnels, and identifying Trojan protocol signatures — then surfaces the results through a Vue 3 dashboard with management of block rules and forensic captures.
 
 ## Features
