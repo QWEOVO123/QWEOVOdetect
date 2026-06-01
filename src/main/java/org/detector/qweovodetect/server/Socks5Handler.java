@@ -11,6 +11,7 @@ import io.netty.handler.codec.haproxy.HAProxyMessage;
 import io.netty.handler.timeout.IdleStateEvent;
 import io.netty.handler.timeout.IdleStateHandler;
 import org.detector.qweovodetect.dpi.SpringContextHolder;
+import org.detector.qweovodetect.dpi.TemporaryTargetBlocklist;
 import org.detector.qweovodetect.stats.AuthConfigService;
 import org.detector.qweovodetect.stats.BlockRuleService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -341,7 +342,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                                 RelayHandler.IDLE_TIMEOUT_SECONDS,
                                 RelayHandler.IDLE_TIMEOUT_SECONDS,
                                 0));
-                        ch.pipeline().addLast(new RelayHandler(ctx.channel(), clientIp, listenPort, 1, chanId, host));
+                        ch.pipeline().addLast(new RelayHandler(ctx.channel(), clientIp, listenPort, 1, chanId, host, port));
                     }
                 });
 
@@ -357,6 +358,13 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                     ctx.close();
                     return;
                 }
+                if (isTemporarilyBlocked(clientIp, targetAddr, port)) {
+                    System.out.printf("[BLOCK:TEMP:%d] %s -> %s:%d%n", listenPort, clientIp, targetAddr, port);
+                    f.channel().close();
+                    sendReply(ctx, (byte) 0x02);
+                    ctx.close();
+                    return;
+                }
                 sendReply(ctx, (byte) 0x00);
                 ctx.pipeline().remove(Socks5Handler.this);
                 if (ctx.pipeline().get(HANDSHAKE_IDLE_HANDLER) != null) {
@@ -366,7 +374,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                         RelayHandler.IDLE_TIMEOUT_SECONDS,
                         RelayHandler.IDLE_TIMEOUT_SECONDS,
                         0));
-                ctx.pipeline().addLast(new RelayHandler(f.channel(), clientIp, listenPort, 0, chanId, targetAddr));
+                ctx.pipeline().addLast(new RelayHandler(f.channel(), clientIp, listenPort, 0, chanId, targetAddr, port));
                 stage = Stage.RELAY;
             } else {
                 System.out.println("[CONNECT] 连接失败: " + host + ":" + port);
@@ -380,6 +388,15 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
         try {
             BlockRuleService blockRuleService = SpringContextHolder.getBean(BlockRuleService.class);
             return blockRuleService != null && blockRuleService.shouldBlockTargetIp(targetIp);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isTemporarilyBlocked(String clientIp, String targetIp, int targetPort) {
+        try {
+            TemporaryTargetBlocklist blocklist = SpringContextHolder.getBean(TemporaryTargetBlocklist.class);
+            return blocklist != null && blocklist.isBlocked(clientIp, targetIp, targetPort);
         } catch (Exception e) {
             return false;
         }

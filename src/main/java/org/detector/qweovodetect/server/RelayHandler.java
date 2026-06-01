@@ -1,11 +1,19 @@
 package org.detector.qweovodetect.server;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.*;
-import io.netty.handler.timeout.IdleStateEvent;
-import org.detector.qweovodetect.dpi.DpiEngine;
-import org.detector.qweovodetect.dpi.TrojanDpiEngineAsync;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.socket.SocketChannel;
+import io.netty.handler.timeout.IdleStateEvent;
+import org.detector.qweovodetect.dpi.DpiConnectionRegistry;
+import org.detector.qweovodetect.dpi.DpiEngine;
+import org.detector.qweovodetect.dpi.DpiModeService;
+import org.detector.qweovodetect.dpi.DpiTaskExecutor;
+import org.detector.qweovodetect.dpi.SpringContextHolder;
+import org.detector.qweovodetect.dpi.TemporaryTargetBlocklist;
+import org.detector.qweovodetect.dpi.TrojanDpiEngineAsync;
 
 public class RelayHandler extends ChannelInboundHandlerAdapter {
 
@@ -15,15 +23,18 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
     private final String clientIp;
     private final int listenPort;
     private final String targetIp;
+    private final int targetPort;
     private final int direction;
     private final int chanId;
+    private DpiConnectionRegistry.TcpRelay registeredRelay;
 
     public RelayHandler(Channel relayTarget,
                         String clientIp,
                         int listenPort,
                         int direction,
                         int chanId,
-                        String targetIp) {
+                        String targetIp,
+                        int targetPort) {
 
         this.relayTarget = relayTarget;
         this.clientIp = clientIp;
@@ -31,25 +42,39 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
         this.direction = direction;
         this.chanId = chanId;
         this.targetIp = targetIp;
+        this.targetPort = targetPort;
+    }
+
+    @Override
+    public void handlerAdded(ChannelHandlerContext ctx) {
+        try {
+            DpiConnectionRegistry registry = SpringContextHolder.getBean(DpiConnectionRegistry.class);
+            if (registry != null) {
+                registeredRelay = registry.registerTcp(ctx.channel(), relayTarget);
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) {
-
         ByteBuf buf = (ByteBuf) msg;
 
         try {
-
-            // ⭐ DPI 仅客户端方向
             TrojanDpiEngineAsync.inspect(buf, clientIp, listenPort, targetIp, chanId, direction);
             if (direction == 0) {
-                if (DpiEngine.inspectAndShouldBlock(buf, clientIp, listenPort, targetIp, chanId, direction)) {
+                if (isTemporarilyBlocked()) {
+                    closeBothWithRst(ctx.channel(), relayTarget);
+                    return;
+                }
+                if (isAsyncDpi()) {
+                    inspectAsync(ctx, buf);
+                } else if (DpiEngine.inspectAndShouldBlock(buf, clientIp, listenPort, targetIp, chanId, direction)) {
                     closeBothWithRst(ctx.channel(), relayTarget);
                     return;
                 }
             }
 
-            // ⭐ 只 write，不 flush
             ByteBuf outbound = buf.retain();
             boolean submitted = false;
             try {
@@ -65,29 +90,24 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
                 }
             }
 
-            // ⭐⭐⭐ 关键修复：继续读取 socket
             ctx.read();
-
         } finally {
             buf.release();
         }
     }
 
-    // ⭐ batch flush
     @Override
     public void channelReadComplete(ChannelHandlerContext ctx) {
         relayTarget.flush();
     }
 
-    // ⭐ TCP Backpressure
     @Override
     public void channelWritabilityChanged(ChannelHandlerContext ctx) {
-
         boolean writable = relayTarget.isWritable();
         ctx.channel().config().setAutoRead(writable);
 
         if (writable) {
-            ctx.read(); // ⭐ 恢复读取（关键）
+            ctx.read();
         }
 
         ctx.fireChannelWritabilityChanged();
@@ -95,15 +115,20 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
+        unregisterRelay();
         DpiEngine.cleanup(chanId);
         TrojanDpiEngineAsync.cleanup(chanId);
-
         closeBoth(ctx.channel(), relayTarget);
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
         closeBoth(ctx.channel(), relayTarget);
+    }
+
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) {
+        unregisterRelay();
     }
 
     @Override
@@ -114,6 +139,65 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
             return;
         }
         super.userEventTriggered(ctx, evt);
+    }
+
+    private boolean isAsyncDpi() {
+        try {
+            DpiModeService dpiModeService = SpringContextHolder.getBean(DpiModeService.class);
+            return dpiModeService != null && dpiModeService.isAsync();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isTemporarilyBlocked() {
+        try {
+            TemporaryTargetBlocklist blocklist = SpringContextHolder.getBean(TemporaryTargetBlocklist.class);
+            return blocklist != null && blocklist.isBlocked(clientIp, targetIp, targetPort);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void inspectAsync(ChannelHandlerContext ctx, ByteBuf buf) {
+        if (!DpiEngine.shouldInspect(chanId, direction)) {
+            return;
+        }
+
+        int len = Math.min(buf.readableBytes(), DpiEngine.MAX_CHUNK_INSPECT);
+        byte[] copy = new byte[len];
+        buf.getBytes(buf.readerIndex(), copy, 0, len);
+
+        DpiTaskExecutor.executeDpiBestEffort(() -> {
+            if (!DpiEngine.inspectAndShouldBlock(copy, clientIp, listenPort, targetIp, chanId, direction)) {
+                return;
+            }
+            blockTemporarily();
+            ctx.channel().eventLoop().execute(() -> closeBothWithRst(ctx.channel(), relayTarget));
+        });
+    }
+
+    private void blockTemporarily() {
+        try {
+            TemporaryTargetBlocklist blocklist = SpringContextHolder.getBean(TemporaryTargetBlocklist.class);
+            if (blocklist != null) {
+                blocklist.block(clientIp, targetIp, targetPort);
+                System.out.printf("[ASYNC-BLOCK:%d] %s -> %s:%d blocked for 120s%n",
+                        listenPort, clientIp, targetIp, targetPort);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void unregisterRelay() {
+        try {
+            DpiConnectionRegistry registry = SpringContextHolder.getBean(DpiConnectionRegistry.class);
+            if (registry != null) {
+                registry.unregisterTcp(registeredRelay);
+            }
+        } catch (Exception ignored) {
+        }
+        registeredRelay = null;
     }
 
     private static void closeBoth(Channel first, Channel second) {

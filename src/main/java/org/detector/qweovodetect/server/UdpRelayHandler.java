@@ -8,8 +8,12 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.handler.timeout.IdleStateEvent;
+import org.detector.qweovodetect.dpi.DpiConnectionRegistry;
+import org.detector.qweovodetect.dpi.DpiModeService;
+import org.detector.qweovodetect.dpi.DpiTaskExecutor;
 import org.detector.qweovodetect.dpi.QuicSniDpiEngine;
 import org.detector.qweovodetect.dpi.SpringContextHolder;
+import org.detector.qweovodetect.dpi.TemporaryTargetBlocklist;
 import org.detector.qweovodetect.stats.BlockRuleService;
 
 import java.net.Inet4Address;
@@ -33,6 +37,7 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
+        registerUdpRelay(ctx.channel());
         tcpChannel.closeFuture().addListener((ChannelFutureListener) ignored -> ctx.channel().close());
 
         InetSocketAddress udpLocal = (InetSocketAddress) ctx.channel().localAddress();
@@ -90,11 +95,18 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
                     listenPort, clientIp, target.host(), target.port(), content.readableBytes());
             return;
         }
+        if (isTemporarilyBlocked(target)) {
+            System.out.printf("[UDP:%d] drop temporary blocked target %s -> %s:%d (%d bytes)%n",
+                    listenPort, clientIp, target.host(), target.port(), content.readableBytes());
+            return;
+        }
 
         ByteBuf payload = content.retainedSlice();
         boolean submitted = false;
         try {
-            if (QuicSniDpiEngine.inspect(payload, clientIp, listenPort, target.host(), target.port())) {
+            if (isAsyncDpi()) {
+                inspectQuicAsync(payload, target);
+            } else if (QuicSniDpiEngine.inspect(payload, clientIp, listenPort, target.host(), target.port())) {
                 System.out.printf("[UDP:%d] drop blocked QUIC %s -> %s:%d (%d bytes)%n",
                         listenPort, clientIp, target.host(), target.port(), payload.readableBytes());
                 return;
@@ -109,6 +121,48 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
         System.out.printf("[UDP:%d] %s -> %s:%d (%d bytes)%n",
                 listenPort, clientIp, target.host(), target.port(), payload.readableBytes());
+    }
+
+    private boolean isAsyncDpi() {
+        try {
+            DpiModeService dpiModeService = SpringContextHolder.getBean(DpiModeService.class);
+            return dpiModeService != null && dpiModeService.isAsync();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean isTemporarilyBlocked(Target target) {
+        try {
+            TemporaryTargetBlocklist blocklist = SpringContextHolder.getBean(TemporaryTargetBlocklist.class);
+            return blocklist != null && blocklist.isBlocked(clientIp, target.host(), target.port());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void inspectQuicAsync(ByteBuf payload, Target target) {
+        int len = payload.readableBytes();
+        if (len < 1200 || len > 65535) {
+            return;
+        }
+
+        byte[] packet = new byte[len];
+        payload.getBytes(payload.readerIndex(), packet);
+        DpiTaskExecutor.executeDpiBestEffort(() -> {
+            if (!QuicSniDpiEngine.inspect(packet, clientIp, listenPort, target.host(), target.port())) {
+                return;
+            }
+            try {
+                TemporaryTargetBlocklist blocklist = SpringContextHolder.getBean(TemporaryTargetBlocklist.class);
+                if (blocklist != null) {
+                    blocklist.block(clientIp, target.host(), target.port());
+                    System.out.printf("[ASYNC-BLOCK:UDP:%d] %s -> %s:%d blocked for 120s%n",
+                            listenPort, clientIp, target.host(), target.port());
+                }
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     private boolean isTargetIpBlocked(String host) {
@@ -232,7 +286,13 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
+        unregisterUdpRelay(ctx.channel());
         tcpChannel.close();
+    }
+
+    @Override
+    public void handlerRemoved(ChannelHandlerContext ctx) {
+        unregisterUdpRelay(ctx.channel());
     }
 
     @Override
@@ -252,5 +312,25 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
     }
 
     private record Target(String host, int port) {
+    }
+
+    private void registerUdpRelay(Channel channel) {
+        try {
+            DpiConnectionRegistry registry = SpringContextHolder.getBean(DpiConnectionRegistry.class);
+            if (registry != null) {
+                registry.registerUdp(channel);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void unregisterUdpRelay(Channel channel) {
+        try {
+            DpiConnectionRegistry registry = SpringContextHolder.getBean(DpiConnectionRegistry.class);
+            if (registry != null) {
+                registry.unregisterUdp(channel);
+            }
+        } catch (Exception ignored) {
+        }
     }
 }

@@ -1,5 +1,7 @@
 package org.detector.qweovodetect.stats;
 
+import org.detector.qweovodetect.dpi.DpiModeService;
+import org.detector.qweovodetect.dpi.TemporaryTargetBlocklist;
 import org.detector.qweovodetect.stats.model.SniLog;
 import org.detector.qweovodetect.stats.model.BlockRule;
 import org.springframework.http.HttpStatus;
@@ -16,11 +18,19 @@ public class ApiController {
     private final StatsService statsService;
     private final BlockRuleService blockRuleService;
     private final ForensicsService forensicsService;
+    private final DpiModeService dpiModeService;
+    private final TemporaryTargetBlocklist temporaryTargetBlocklist;
 
-    public ApiController(StatsService statsService, BlockRuleService blockRuleService, ForensicsService forensicsService) {
+    public ApiController(StatsService statsService,
+                         BlockRuleService blockRuleService,
+                         ForensicsService forensicsService,
+                         DpiModeService dpiModeService,
+                         TemporaryTargetBlocklist temporaryTargetBlocklist) {
         this.statsService = statsService;
         this.blockRuleService = blockRuleService;
         this.forensicsService = forensicsService;
+        this.dpiModeService = dpiModeService;
+        this.temporaryTargetBlocklist = temporaryTargetBlocklist;
     }
 
     // 域名排行
@@ -71,6 +81,27 @@ public class ApiController {
     @GetMapping("/trojan/total")
     public Map<String, Object> trojanTotal() {
         return Map.of("total", statsService.getTrojanTotal());
+    }
+
+    @GetMapping("/dpi-mode")
+    public Map<String, Object> dpiMode() {
+        return Map.of(
+                "mode", dpiModeService.currentMode().name(),
+                "temporaryBlocks", temporaryTargetBlocklist.size());
+    }
+
+    @PostMapping("/dpi-mode")
+    public Map<String, Object> setDpiMode(@RequestBody Map<String, String> body) {
+        try {
+            DpiModeService.SwitchResult result = dpiModeService.setMode(body.get("mode"));
+            return Map.of(
+                    "mode", result.mode().name(),
+                    "tcpRelaysReset", result.tcpRelaysReset(),
+                    "udpRelaysReset", result.udpRelaysReset(),
+                    "temporaryBlocks", temporaryTargetBlocklist.size());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
     }
 
     @GetMapping("/block-rules")

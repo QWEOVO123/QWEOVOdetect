@@ -1,5 +1,11 @@
 <template>
   <div class="dashboard-shell">
+    <div v-if="dpiModeSaving" class="switching-overlay" aria-live="polite" aria-busy="true">
+      <div class="switching-box">
+        <span class="spinner"></span>
+        <strong>DPI 模式切换中</strong>
+      </div>
+    </div>
     <header class="topbar">
       <div class="brand">
         <div class="brand-mark">Q</div>
@@ -39,6 +45,37 @@
             <strong>{{ item.value }}</strong>
           </div>
         </article>
+      </section>
+
+      <section class="panel dpi-mode-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">DPI Mode</p>
+            <h3>DPI 检测模式</h3>
+          </div>
+          <span class="hint">临时封禁 {{ dpiTemporaryBlocks }} 项</span>
+        </div>
+        <div class="dpi-mode-body">
+          <div class="mode-switch" role="group" aria-label="DPI 检测模式">
+            <button
+              type="button"
+              :class="{ active: dpiMode === 'SYNC' }"
+              :disabled="dpiModeSaving"
+              @click="setDpiMode('SYNC')"
+            >
+              同步阻断
+            </button>
+            <button
+              type="button"
+              :class="{ active: dpiMode === 'ASYNC' }"
+              :disabled="dpiModeSaving"
+              @click="setDpiMode('ASYNC')"
+            >
+              异步优先转发
+            </button>
+          </div>
+          <span class="mode-state">{{ dpiMode === 'ASYNC' ? '先转发，命中后 RST/临时封禁' : '命中后再转发' }}</span>
+        </div>
       </section>
 
       <section class="panel port-panel">
@@ -500,6 +537,9 @@ const blockKeyword = ref('')
 const targetIpKeyword = ref('')
 const blockSaving = ref(false)
 const blockError = ref('')
+const dpiMode = ref('SYNC')
+const dpiModeSaving = ref(false)
+const dpiTemporaryBlocks = ref(0)
 const forensicsSessions = ref([])
 const forensicsSaving = ref(false)
 const forensicsError = ref('')
@@ -605,7 +645,7 @@ function protocolClass(protocol) {
 
 async function loadData() {
   try {
-    const [totalRes, sitesRes, clientsRes, ssTotalRes, trojanTotalRes, ssRankRes, ssRiskRes, portsRes, blockRulesRes, forensicsRes] = await Promise.all([
+    const [totalRes, sitesRes, clientsRes, ssTotalRes, trojanTotalRes, ssRankRes, ssRiskRes, portsRes, blockRulesRes, forensicsRes, dpiModeRes] = await Promise.all([
       api.get('/total'),
       api.get('/top-sites', { params: { hours: 24 } }),
       api.get('/all-clients'),
@@ -615,7 +655,8 @@ async function loadData() {
       api.get('/ss/high-risk'),
       api.get('/ports/summary'),
       api.get('/block-rules'),
-      api.get('/forensics')
+      api.get('/forensics'),
+      api.get('/dpi-mode')
     ])
 
     total.value = totalRes.data.total
@@ -631,6 +672,8 @@ async function loadData() {
     portSummary.value = portsRes.data
     blockRules.value = blockRulesRes.data
     forensicsSessions.value = forensicsRes.data
+    dpiMode.value = dpiModeRes.data.mode || 'SYNC'
+    dpiTemporaryBlocks.value = Number(dpiModeRes.data.temporaryBlocks || 0)
     if (!forensicPortOptions.value.includes(forensicsForm.value.listenPort)) {
       forensicsForm.value.listenPort = forensicPortOptions.value[0]
     }
@@ -647,6 +690,20 @@ async function loadForensics() {
 async function loadBlockRules() {
   const res = await api.get('/block-rules')
   blockRules.value = res.data
+}
+
+async function setDpiMode(mode) {
+  if (dpiMode.value === mode || dpiModeSaving.value) {
+    return
+  }
+  dpiModeSaving.value = true
+  try {
+    const res = await api.post('/dpi-mode', { mode })
+    dpiMode.value = res.data.mode || mode
+    dpiTemporaryBlocks.value = Number(res.data.temporaryBlocks || 0)
+  } finally {
+    dpiModeSaving.value = false
+  }
 }
 
 async function addBlockRule() {
@@ -1028,6 +1085,44 @@ onUnmounted(() => {
     radial-gradient(circle at 12% 8%, rgba(20, 184, 166, 0.14), transparent 26%),
     radial-gradient(circle at 96% 2%, rgba(245, 158, 11, 0.14), transparent 26%);
   color: #18231f;
+}
+
+.switching-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 24, 21, 0.36);
+  backdrop-filter: blur(3px);
+}
+
+.switching-box {
+  min-width: 220px;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 22px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.44);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #15352f;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+}
+
+.spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid #d8e8e2;
+  border-top-color: #123b34;
+  border-radius: 50%;
+  animation: spin 0.72s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .topbar {
@@ -1486,6 +1581,54 @@ onUnmounted(() => {
 
 .panel-full {
   grid-column: 1 / -1;
+}
+
+.dpi-mode-panel {
+  margin-bottom: 18px;
+}
+
+.dpi-mode-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(128px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #dbe7e2;
+  border-radius: 8px;
+  background: #f6faf8;
+}
+
+.mode-switch button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #587069;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.mode-switch button.active {
+  background: #123b34;
+  color: #ffffff;
+}
+
+.mode-switch button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.mode-state {
+  color: #526963;
+  font-size: 13px;
+  font-weight: 750;
 }
 
 .panel-head {
