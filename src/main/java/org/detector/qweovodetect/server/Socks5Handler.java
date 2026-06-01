@@ -315,7 +315,15 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                     }
                 });
 
-        bootstrap.bind(0).addListener((ChannelFutureListener) f -> {
+        ChannelFuture bindFuture;
+        InetSocketAddress tcpLocal = (InetSocketAddress) ctx.channel().localAddress();
+        if (tcpLocal.getAddress() != null && !tcpLocal.getAddress().isAnyLocalAddress()) {
+            bindFuture = bootstrap.bind(new InetSocketAddress(tcpLocal.getAddress(), 0));
+        } else {
+            bindFuture = bootstrap.bind(0);
+        }
+
+        bindFuture.addListener((ChannelFutureListener) f -> {
             if (!f.isSuccess()) {
                 sendReply(ctx, (byte) 0x01);
                 ctx.close();

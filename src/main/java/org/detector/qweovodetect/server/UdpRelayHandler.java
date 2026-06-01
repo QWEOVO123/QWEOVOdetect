@@ -102,13 +102,14 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
         }
 
         ByteBuf payload = content.retainedSlice();
+        int payloadLength = payload.readableBytes();
         boolean submitted = false;
         try {
             if (isAsyncDpi()) {
                 inspectQuicAsync(payload, target);
             } else if (QuicSniDpiEngine.inspect(payload, clientIp, listenPort, target.host(), target.port())) {
                 System.out.printf("[UDP:%d] drop blocked QUIC %s -> %s:%d (%d bytes)%n",
-                        listenPort, clientIp, target.host(), target.port(), payload.readableBytes());
+                        listenPort, clientIp, target.host(), target.port(), payloadLength);
                 return;
             }
             ctx.writeAndFlush(new DatagramPacket(payload, new InetSocketAddress(target.host(), target.port())));
@@ -120,7 +121,7 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
         }
 
         System.out.printf("[UDP:%d] %s -> %s:%d (%d bytes)%n",
-                listenPort, clientIp, target.host(), target.port(), payload.readableBytes());
+                listenPort, clientIp, target.host(), target.port(), payloadLength);
     }
 
     private boolean isAsyncDpi() {
