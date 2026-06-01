@@ -24,6 +24,7 @@ public class QuicSniDpiEngine {
     private static final byte[] QUIC_V1_INITIAL_SALT = hex("38762cf7f55934b34d179ae6a4c80cadccbb7f0a");
     private static final int MAX_PACKETS_PER_FLOW = 8;
     private static final int MAX_CRYPTO_BYTES = 16384;
+    private static final int MAX_STATE_ENTRIES = 8192;
     private static final long STATE_TTL_MS = 180_000;
     private static final long CLEANUP_INTERVAL_MS = 60_000;
 
@@ -71,10 +72,18 @@ public class QuicSniDpiEngine {
         }
 
         long now = System.currentTimeMillis();
-        cleanupExpired(now);
+        ParsedHeader header = parseInitialHeader(packet);
+        if (!isInspectableInitialHeader(header, packet)) {
+            return false;
+        }
 
         String key = listenPort + "|" + clientIp + "|" + targetHost + ":" + targetPort;
-        FlowState state = states.computeIfAbsent(key, ignored -> new FlowState());
+        StateLookup lookup = lookupState(key, now);
+        if (lookup == null) {
+            return false;
+        }
+
+        FlowState state = lookup.state();
         synchronized (state) {
             state.lastSeen = now;
             if (state.finished) {
@@ -88,8 +97,11 @@ public class QuicSniDpiEngine {
             }
             state.packetCount++;
 
-            byte[] crypto = decryptInitialCrypto(packet);
+            byte[] crypto = decryptInitialCrypto(packet, header);
             if (crypto == null || crypto.length == 0) {
+                if (lookup.created()) {
+                    states.remove(key, state);
+                }
                 return false;
             }
 
@@ -128,9 +140,12 @@ public class QuicSniDpiEngine {
     }
 
     private static byte[] decryptInitialCrypto(byte[] packet) {
+        return decryptInitialCrypto(packet, parseInitialHeader(packet));
+    }
+
+    private static byte[] decryptInitialCrypto(byte[] packet, ParsedHeader header) {
         try {
-            ParsedHeader header = parseInitialHeader(packet);
-            if (header == null || header.version != 1 || header.dcid.length < 8 || header.sampleOffset + 16 > packet.length) {
+            if (!isInspectableInitialHeader(header, packet)) {
                 return null;
             }
 
@@ -165,6 +180,34 @@ public class QuicSniDpiEngine {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static boolean isInspectableInitialHeader(ParsedHeader header, byte[] packet) {
+        return header != null
+                && header.version == 1
+                && header.dcid.length >= 8
+                && header.sampleOffset + 16 <= packet.length;
+    }
+
+    private static StateLookup lookupState(String key, long now) {
+        FlowState existing = states.get(key);
+        if (existing != null) {
+            return new StateLookup(existing, false);
+        }
+
+        if (states.size() >= MAX_STATE_ENTRIES) {
+            cleanupExpired(now);
+            if (states.size() >= MAX_STATE_ENTRIES) {
+                return null;
+            }
+        }
+
+        FlowState created = new FlowState();
+        FlowState previous = states.putIfAbsent(key, created);
+        if (previous != null) {
+            return new StateLookup(previous, false);
+        }
+        return new StateLookup(created, true);
     }
 
     private static ParsedHeader parseInitialHeader(byte[] packet) {
@@ -460,6 +503,9 @@ public class QuicSniDpiEngine {
     }
 
     private record ParsedHeader(int version, byte[] dcid, int pnOffset, int sampleOffset, int payloadLength) {
+    }
+
+    private record StateLookup(FlowState state, boolean created) {
     }
 
     private record InitialKeys(byte[] key, byte[] iv, byte[] hp) {
