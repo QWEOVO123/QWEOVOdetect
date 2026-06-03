@@ -20,19 +20,27 @@ import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket> {
 
     private final Channel tcpChannel;
     private final String clientIp;
     private final int listenPort;
+    private final InetAddress expectedClientAddress;
+    private final Set<InetSocketAddress> remoteSenders = ConcurrentHashMap.newKeySet();
     private InetSocketAddress clientSender;
 
     public UdpRelayHandler(Channel tcpChannel, String clientIp, int listenPort) {
         this.tcpChannel = tcpChannel;
         this.clientIp = clientIp;
         this.listenPort = listenPort;
+        this.expectedClientAddress = tcpChannel.remoteAddress() instanceof InetSocketAddress remote
+                ? remote.getAddress()
+                : null;
     }
 
     @Override
@@ -65,10 +73,13 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
     }
 
     private boolean isClientPacket(DatagramPacket packet) {
+        if (remoteSenders.contains(packet.sender())) {
+            return false;
+        }
         if (clientSender == null) {
             return true;
         }
-        return clientSender.equals(packet.sender());
+        return clientSender.equals(packet.sender()) || sameAddress(expectedClientAddress, packet.sender().getAddress());
     }
 
     private void relayClientPacket(ChannelHandlerContext ctx, DatagramPacket packet) {
@@ -112,7 +123,9 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
                         listenPort, clientIp, target.host(), target.port(), payloadLength);
                 return;
             }
-            ctx.writeAndFlush(new DatagramPacket(payload, new InetSocketAddress(target.host(), target.port())));
+            InetSocketAddress recipient = new InetSocketAddress(target.host(), target.port());
+            remoteSenders.add(recipient);
+            ctx.writeAndFlush(new DatagramPacket(payload, recipient));
             submitted = true;
         } finally {
             if (!submitted) {
@@ -265,7 +278,19 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
             return tcpLocal.getAddress();
         }
 
-        return InetAddress.getLoopbackAddress();
+        return wildcardIpv4Address();
+    }
+
+    private static boolean sameAddress(InetAddress left, InetAddress right) {
+        return left != null && right != null && left.equals(right);
+    }
+
+    private static InetAddress wildcardIpv4Address() {
+        try {
+            return InetAddress.getByAddress(new byte[]{0, 0, 0, 0});
+        } catch (UnknownHostException e) {
+            throw new IllegalStateException("Unable to create IPv4 wildcard address", e);
+        }
     }
 
     private static void writeAddress(ByteBuf out, InetAddress address) {

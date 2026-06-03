@@ -26,11 +26,13 @@ router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
   let setupLocked = false
 
-  try {
-    const setup = await authStore.setupStatus()
-    setupLocked = Boolean(setup.firstStartup || setup.pendingRestart)
-  } catch (e) {
-    setupLocked = false
+  if (to.path === '/login' || authStore.isLoggedIn()) {
+    try {
+      const setup = await authStore.setupStatus()
+      setupLocked = Boolean(setup.firstStartup || setup.pendingRestart)
+    } catch (e) {
+      setupLocked = false
+    }
   }
 
   if (setupLocked) {
