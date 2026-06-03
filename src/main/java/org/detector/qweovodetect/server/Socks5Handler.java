@@ -315,13 +315,10 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                     }
                 });
 
-        ChannelFuture bindFuture;
-        InetSocketAddress tcpLocal = (InetSocketAddress) ctx.channel().localAddress();
-        if (tcpLocal.getAddress() != null && !tcpLocal.getAddress().isAnyLocalAddress()) {
-            bindFuture = bootstrap.bind(new InetSocketAddress(tcpLocal.getAddress(), 0));
-        } else {
-            bindFuture = bootstrap.bind(0);
-        }
+        // Bind the UDP relay to INADDR_ANY. When the SOCKS TCP connection is local
+        // only (for example Xray -> 127.0.0.1), binding UDP to loopback would stop
+        // forwarded packets such as DNS queries from reaching external targets.
+        ChannelFuture bindFuture = bootstrap.bind(0);
 
         bindFuture.addListener((ChannelFutureListener) f -> {
             if (!f.isSuccess()) {
