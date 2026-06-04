@@ -33,17 +33,9 @@ public class SsDetectionTracker {
         hits.add(now);
         hits.removeIf(t -> now - t > WINDOW_MS);
 
-        int count = hits.size();
-        if (count >= THRESHOLD) {
+        if (hits.size() >= THRESHOLD) {
             alreadyReportedAt.put(targetAddr, now);
-            System.out.printf("[楂樺嵄鍒ゅ畾] 鐩爣 %s 鍦?鍒嗛挓鍐呰Е鍙?d娆★紝鍏宠仈瀹㈡埛绔? %s%n",
-                    targetAddr, count, targetClients.get(targetAddr));
             return true;
-        }
-
-        if (count >= 10 && count % 5 == 0) {
-            System.out.printf("[杩借釜涓璢 %s 褰撳墠鍛戒腑娆℃暟: %d/%d%n",
-                    targetAddr, count, THRESHOLD);
         }
 
         return false;

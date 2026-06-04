@@ -22,7 +22,6 @@ public class SSDetector {
 
     public static boolean detect(byte[] data, String clientIp, int listenPort, String targetIp, int chanId) {
         if (data == null || data.length < MIN_PACKET_SIZE) return false;
-
         if (detectedChannels.containsKey(chanId)) return false;
 
         int count = detectCountMap.merge(chanId, 1, Integer::sum);
@@ -34,42 +33,26 @@ public class SSDetector {
         if (isLikelyEncryptedTunnel(data)) {
             detectedChannels.put(chanId, true);
 
-            float avgPop = calcAvgPopcount(data);
-            float printableRatio = calcPrintableRatio(data);
-
-            System.out.printf("[SS:%d] %s -> %s 疑似加密隧道 (熵值=%.2f, ASCII比例=%.1f%%)%n",
-                    listenPort, clientIp, targetIp, avgPop, printableRatio);
-
-            System.out.print("[异常数据流] ");
-            for (int i = 0; i < Math.min(16, data.length); i++) {
-                System.out.printf("%02x ", data[i] & 0xFF);
-            }
-            System.out.println();
-
-            // 每次检测到立刻入库
             DpiTaskExecutor.executeDb(() -> {
                 try {
                     StatsService statsService = SpringContextHolder.getBean(StatsService.class);
                     if (statsService != null) {
                         statsService.saveSs(clientIp, listenPort, targetIp);
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception ignored) {
+                }
             });
 
-            // 追踪高危
             try {
                 ForensicsService forensicsService = SpringContextHolder.getBean(ForensicsService.class);
                 if (forensicsService != null) {
                     forensicsService.recordSs(listenPort, clientIp, targetIp);
                 }
-            } catch (Exception ignored) {}
-
-            String targetKey = listenPort + "|" + targetIp;
-            if (SsDetectionTracker.hit(targetKey, clientIp)) {
-                System.out.printf("[高危告警:%d] 目标 %s 3分钟内触发%d次！%n",
-                        listenPort, targetIp, SsDetectionTracker.getCount(targetKey));
+            } catch (Exception ignored) {
             }
 
+            String targetKey = listenPort + "|" + targetIp;
+            SsDetectionTracker.hit(targetKey, clientIp);
             return true;
         }
         return false;
@@ -128,9 +111,8 @@ public class SSDetector {
         int same = 0;
         for (int i = 1; i < 4; i++) if (data[i] == data[0]) same++;
         if (same >= 2) return true;
-        if ((data[1] & 0xFF) == (data[0] & 0xFF) + 1
-                && (data[2] & 0xFF) == (data[1] & 0xFF) + 1) return true;
-        return false;
+        return (data[1] & 0xFF) == (data[0] & 0xFF) + 1
+                && (data[2] & 0xFF) == (data[1] & 0xFF) + 1;
     }
 
     private static boolean isKnownProtocol(byte[] data) {
@@ -139,14 +121,14 @@ public class SSDetector {
         if (data.length >= 3 && data[0] == 0x03 && data[1] == 0x00) return true;
         if (data.length >= 5 && startsWith(data, MYSQL_BANNER)) return true;
         if (data.length >= 8 && data[0] == 0x12 && data[1] == 0x01) return true;
-        if (data.length >= 8 && data[0] == 0x00 && data[4] == 0x00) return true;
-        return false;
+        return data.length >= 8 && data[0] == 0x00 && data[4] == 0x00;
     }
 
     private static boolean startsWith(byte[] data, byte[] prefix) {
         if (data.length < prefix.length) return false;
-        for (int i = 0; i < prefix.length; i++)
+        for (int i = 0; i < prefix.length; i++) {
             if (data[i] != prefix[i]) return false;
+        }
         return true;
     }
 

@@ -35,7 +35,6 @@ public class TlsSniParser {
         if (sni != null) {
             parsed = true;
             bufLen = 0;
-            System.out.printf("[TLS:%d] %s -> %s%n", listenPort, clientIp, sni);
             //写入数据库
             try {
                 org.detector.qweovodetect.stats.StatsService statsService =

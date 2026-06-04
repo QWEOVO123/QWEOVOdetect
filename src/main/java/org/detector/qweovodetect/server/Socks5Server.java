@@ -69,13 +69,9 @@ public class Socks5Server {
                 bindInbound(inbound);
             } else if (!sameRuntimeConfig(current, inbound)) {
                 inboundConfigs.put(inbound.port(), inbound);
-                System.out.println("[SOCKS5] updated inbound on port " + inbound.port() + " (" + inbound.nickname() + ")");
             }
         }
 
-        if (boundChannels.isEmpty()) {
-            System.out.println("[SOCKS5] no enabled inbound configured");
-        }
     }
 
     public synchronized void validateReload(List<AuthConfigService.InboundConfig> nextInbounds) {
@@ -103,7 +99,6 @@ public class Socks5Server {
             Channel channel = portBootstrap.bind(inbound.port()).sync().channel();
             boundChannels.put(inbound.port(), channel);
             inboundConfigs.put(inbound.port(), inbound);
-            System.out.println("[SOCKS5] listening on port " + inbound.port() + " (" + inbound.nickname() + ")");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("绑定 SOCKS5 入站端口被中断：" + inbound.port(), e);
@@ -118,7 +113,6 @@ public class Socks5Server {
         if (channel != null) {
             channel.close();
         }
-        System.out.println("[SOCKS5] closed inbound on port " + port);
     }
 
     private boolean sameRuntimeConfig(AuthConfigService.InboundConfig left, AuthConfigService.InboundConfig right) {

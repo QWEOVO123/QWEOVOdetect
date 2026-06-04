@@ -134,7 +134,6 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         if (evt instanceof IdleStateEvent) {
-            System.out.printf("[RELAY:%d] idle timeout %s -> %s, closing%n", listenPort, clientIp, targetIp);
             closeBoth(ctx.channel(), relayTarget);
             return;
         }
@@ -182,8 +181,6 @@ public class RelayHandler extends ChannelInboundHandlerAdapter {
             TemporaryTargetBlocklist blocklist = SpringContextHolder.getBean(TemporaryTargetBlocklist.class);
             if (blocklist != null) {
                 blocklist.block(clientIp, targetIp, targetPort);
-                System.out.printf("[ASYNC-BLOCK:%d] %s -> %s:%d blocked for 120s%n",
-                        listenPort, clientIp, targetIp, targetPort);
             }
         } catch (Exception ignored) {
         }

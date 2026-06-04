@@ -2,9 +2,6 @@ package org.detector.qweovodetect.dpi;
 
 import java.nio.charset.StandardCharsets;
 
-/**
- * HTTP Host 提取
- */
 public class HttpHostParser {
 
     public static String parse(byte[] data, String clientIp) {
@@ -29,9 +26,6 @@ public class HttpHostParser {
         }
 
         if (host.length() == 0) return null;
-
-        String domain = host.toString();
-        System.out.printf("[HTTP检测] %s -> %s%n", clientIp, domain);
-        return domain;
+        return host.toString();
     }
 }

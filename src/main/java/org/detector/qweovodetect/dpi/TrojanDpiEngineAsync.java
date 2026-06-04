@@ -47,9 +47,6 @@ public class TrojanDpiEngineAsync {
             state.finished = true;
         }
 
-        System.out.printf("[Trojan:%d] %s -> %s matched upload=%d download=%d%n",
-                listenPort, clientIp, targetIp, hit.uploadBytes(), hit.downloadBytes());
-
         DpiTaskExecutor.executeDb(() -> saveTrojan(clientIp, listenPort, targetIp, hit));
         recordForensics(clientIp, listenPort, targetIp, hit);
     }

@@ -59,7 +59,6 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
         reply.writeShort(udpLocal.getPort());
 
         tcpChannel.writeAndFlush(reply);
-        System.out.println("[UDP:" + listenPort + "] native relay ready " + bindAddress.getHostAddress() + ":" + udpLocal.getPort());
     }
 
     @Override
@@ -85,17 +84,23 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
     private void relayClientPacket(ChannelHandlerContext ctx, DatagramPacket packet) {
         ByteBuf content = packet.content();
         if (content.readableBytes() < 4) {
+            System.out.printf("[UDP:%d] drop short client packet from %s (%d bytes)%n",
+                    listenPort, packet.sender(), content.readableBytes());
             return;
         }
 
         content.skipBytes(2);
         byte frag = content.readByte();
         if (frag != 0x00) {
+            System.out.printf("[UDP:%d] drop fragmented packet from %s frag=%d%n",
+                    listenPort, packet.sender(), frag & 0xff);
             return;
         }
 
         Target target = readTarget(content, content.readByte());
         if (target == null) {
+            System.out.printf("[UDP:%d] drop malformed client packet from %s%n",
+                    listenPort, packet.sender());
             return;
         }
 
@@ -125,7 +130,17 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
             }
             InetSocketAddress recipient = new InetSocketAddress(target.host(), target.port());
             remoteSenders.add(recipient);
-            ctx.writeAndFlush(new DatagramPacket(payload, recipient));
+            ctx.writeAndFlush(new DatagramPacket(payload, recipient))
+                    .addListener((ChannelFutureListener) future -> {
+                        if (!future.isSuccess()) {
+                            System.out.printf("[UDP:%d] send failed %s -> %s:%d - %s%n",
+                                    listenPort,
+                                    clientIp,
+                                    target.host(),
+                                    target.port(),
+                                    describe(future.cause()));
+                        }
+                    });
             submitted = true;
         } finally {
             if (!submitted) {
@@ -133,8 +148,6 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
             }
         }
 
-        System.out.printf("[UDP:%d] %s -> %s:%d (%d bytes)%n",
-                listenPort, clientIp, target.host(), target.port(), payloadLength);
     }
 
     private boolean isAsyncDpi() {
@@ -171,8 +184,6 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
                 TemporaryTargetBlocklist blocklist = SpringContextHolder.getBean(TemporaryTargetBlocklist.class);
                 if (blocklist != null) {
                     blocklist.block(clientIp, target.host(), target.port());
-                    System.out.printf("[ASYNC-BLOCK:UDP:%d] %s -> %s:%d blocked for 120s%n",
-                            listenPort, clientIp, target.host(), target.port());
                 }
             } catch (Exception ignored) {
             }
@@ -192,6 +203,8 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
     private void relayRemotePacket(ChannelHandlerContext ctx, DatagramPacket packet) {
         InetSocketAddress destination = clientSender;
         if (destination == null) {
+            System.out.printf("[UDP:%d] drop remote packet from %s before client sender is known (%d bytes)%n",
+                    listenPort, packet.sender(), packet.content().readableBytes());
             return;
         }
 
@@ -204,13 +217,30 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
 
         boolean submitted = false;
         try {
-            ctx.writeAndFlush(new DatagramPacket(wrapped, destination));
+            ctx.writeAndFlush(new DatagramPacket(wrapped, destination))
+                    .addListener((ChannelFutureListener) future -> {
+                        if (!future.isSuccess()) {
+                            System.out.printf("[UDP:%d] reply failed %s -> %s - %s%n",
+                                    listenPort,
+                                    packet.sender(),
+                                    destination,
+                                    describe(future.cause()));
+                        }
+                    });
             submitted = true;
         } finally {
             if (!submitted) {
                 wrapped.release();
             }
         }
+
+    }
+
+    private static String describe(Throwable cause) {
+        if (cause == null) {
+            return "unknown";
+        }
+        return cause.getClass().getSimpleName() + ": " + cause.getMessage();
     }
 
     private Target readTarget(ByteBuf content, byte atyp) {
@@ -324,7 +354,6 @@ public class UdpRelayHandler extends SimpleChannelInboundHandler<DatagramPacket>
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         if (evt instanceof IdleStateEvent) {
-            System.out.printf("[UDP:%d] idle timeout %s, closing relay%n", listenPort, clientIp);
             ctx.close();
             return;
         }

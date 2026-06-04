@@ -6,6 +6,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioDatagramChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.haproxy.*;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
 import io.netty.handler.timeout.IdleStateEvent;
@@ -89,7 +90,6 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
             String[] parts = line.split(" ");
             if (parts.length >= 6) {
                 realClientIp = parts[2];
-                System.out.println("[Proxy Protocol] 真实客户端: " + realClientIp);
             }
             buf.skipBytes(end + 2); // 跳过 PROXY 行
             stage = Stage.HANDSHAKE;
@@ -112,7 +112,6 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 realClientIp = String.format("%d.%d.%d.%d",
                         buf.getByte(16) & 0xFF, buf.getByte(17) & 0xFF,
                         buf.getByte(18) & 0xFF, buf.getByte(19) & 0xFF);
-                System.out.println("[Proxy Protocol V2] 真实客户端: " + realClientIp);
             }
             buf.skipBytes(totalLen);
             stage = Stage.HANDSHAKE;
@@ -226,6 +225,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
         buf.skipBytes(1);
         byte cmd = buf.readByte();
         buf.skipBytes(1);
+        String clientIp = getClientIp(ctx);
 
         if (cmd == 0x03) {
             handleUdpAssociate(ctx, buf);
@@ -233,6 +233,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
         }
 
         if (cmd != 0x01) {
+            System.out.println("[SOCKS5:" + listenPort + "] " + clientIp + " unsupported command " + (cmd & 0xff));
             sendReply(ctx, (byte) 0x07);
             return;
         }
@@ -276,9 +277,7 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
             }
         }
 
-        String clientIp = getClientIp(ctx);
         int chanId = idGen.incrementAndGet();
-        System.out.println("[CONNECT:" + listenPort + "] " + clientIp + " -> " + host + ":" + port);
         connectAndRelay(ctx, host, port, clientIp, chanId);
     }
 
@@ -299,8 +298,6 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
             default -> { sendReply(ctx, (byte) 0x08); return; }
         }
 
-        System.out.println("[UDP:" + listenPort + "] " + clientIp + " requested UDP relay");
-
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(ctx.channel().eventLoop())
                 .channel(NioDatagramChannel.class)
@@ -315,13 +312,23 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                     }
                 });
 
-        // Bind the UDP relay to INADDR_ANY. When the SOCKS TCP connection is local
-        // only (for example Xray -> 127.0.0.1), binding UDP to loopback would stop
-        // forwarded packets such as DNS queries from reaching external targets.
-        ChannelFuture bindFuture = bootstrap.bind(0);
+        bootstrap.bind(listenPort).addListener((ChannelFutureListener) f -> {
+            if (f.isSuccess()) {
+                completeUdpRelayBind(ctx, f);
+                return;
+            }
 
-        bindFuture.addListener((ChannelFutureListener) f -> {
+            bootstrap.bind(0).addListener((ChannelFutureListener) fallback -> completeUdpRelayBind(ctx, fallback));
+        });
+    }
+
+    private void completeUdpRelayBind(ChannelHandlerContext ctx, ChannelFuture f) {
             if (!f.isSuccess()) {
+                Throwable cause = f.cause();
+                String reason = cause == null
+                        ? "unknown"
+                        : cause.getClass().getSimpleName() + ": " + cause.getMessage();
+                System.out.println("[UDP:" + listenPort + "] relay bind failed - " + reason);
                 sendReply(ctx, (byte) 0x01);
                 ctx.close();
                 return;
@@ -330,13 +337,12 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 ctx.pipeline().remove(HANDSHAKE_IDLE_HANDLER);
             }
             stage = Stage.UDP_ASSOCIATE;
-        });
     }
 
     private void connectAndRelay(ChannelHandlerContext ctx, String host, int port, String clientIp, int chanId) {
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(ctx.channel().eventLoop())
-                .channel(ctx.channel().getClass())
+                .channel(NioSocketChannel.class)
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
                 .option(ChannelOption.TCP_NODELAY, true)
                 .option(ChannelOption.SO_KEEPALIVE, false)
@@ -382,7 +388,11 @@ public class Socks5Handler extends ChannelInboundHandlerAdapter {
                 ctx.pipeline().addLast(new RelayHandler(f.channel(), clientIp, listenPort, 0, chanId, targetAddr, port));
                 stage = Stage.RELAY;
             } else {
-                System.out.println("[CONNECT] 连接失败: " + host + ":" + port);
+                Throwable cause = f.cause();
+                String reason = cause == null
+                        ? "unknown"
+                        : cause.getClass().getSimpleName() + ": " + cause.getMessage();
+                System.out.println("[CONNECT] failed: " + host + ":" + port + " - " + reason);
                 sendReply(ctx, (byte) 0x04);
                 ctx.close();
             }

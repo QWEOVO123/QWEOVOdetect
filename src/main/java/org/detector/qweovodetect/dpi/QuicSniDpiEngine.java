@@ -119,9 +119,6 @@ public class QuicSniDpiEngine {
 
             state.finished = true;
             states.remove(key);
-            System.out.printf("[QUIC:%d] %s -> %s:%d SNI %s%n",
-                    listenPort, clientIp, targetHost, targetPort, sni);
-
             DpiTaskExecutor.executeDb(() -> saveSni(clientIp, listenPort, sni));
             recordForensics(clientIp, listenPort, targetHost, targetPort, sni);
             return isBlocked(sni, clientIp, listenPort, targetHost, targetPort);
