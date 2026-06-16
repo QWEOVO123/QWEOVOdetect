@@ -6,6 +6,9 @@ import org.detector.qweovodetect.stats.StatsService;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class TrojanDpiEngineAsync {
 
@@ -14,6 +17,22 @@ public class TrojanDpiEngineAsync {
     private static final int DIR_DOWNLOAD = 1;
 
     private static final Map<Integer, FlowState> states = new ConcurrentHashMap<>();
+    private static final int MAX_STATE_ENTRIES = 8192;
+    private static final long STATE_TTL_MS = 180_000;
+    private static final long CLEANUP_INTERVAL_MS = 60_000;
+    private static final ScheduledExecutorService CLEANUP_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "trojan-dpi-state-cleanup");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    static {
+        CLEANUP_EXECUTOR.scheduleWithFixedDelay(
+                () -> cleanupExpired(System.currentTimeMillis()),
+                CLEANUP_INTERVAL_MS,
+                CLEANUP_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
+    }
 
     public static void inspect(ByteBuf buf,
                                String clientIp,
@@ -25,9 +44,13 @@ public class TrojanDpiEngineAsync {
             return;
         }
 
-        FlowState state = states.computeIfAbsent(chanId, ignored -> new FlowState());
+        FlowState state = lookupState(chanId);
+        if (state == null) {
+            return;
+        }
         TrojanHit hit;
         synchronized (state) {
+            state.lastSeen = System.currentTimeMillis();
             if (state.finished) {
                 return;
             }
@@ -132,12 +155,41 @@ public class TrojanDpiEngineAsync {
         states.remove(chanId);
     }
 
+    private static FlowState lookupState(int chanId) {
+        FlowState existing = states.get(chanId);
+        if (existing != null) {
+            existing.lastSeen = System.currentTimeMillis();
+            return existing;
+        }
+
+        long now = System.currentTimeMillis();
+        if (states.size() >= MAX_STATE_ENTRIES) {
+            cleanupExpired(now);
+            if (states.size() >= MAX_STATE_ENTRIES) {
+                return null;
+            }
+        }
+
+        FlowState created = new FlowState(now);
+        FlowState previous = states.putIfAbsent(chanId, created);
+        return previous == null ? created : previous;
+    }
+
+    private static void cleanupExpired(long now) {
+        states.entrySet().removeIf(entry -> now - entry.getValue().lastSeen > STATE_TTL_MS);
+    }
+
     private static class FlowState {
+        private volatile long lastSeen;
         private boolean uploading;
         private int uploadCount;
         private boolean downloading;
         private int downloadCount;
         private boolean finished;
+
+        private FlowState(long lastSeen) {
+            this.lastSeen = lastSeen;
+        }
     }
 
     private record TrojanHit(int uploadBytes, int downloadBytes) {

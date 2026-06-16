@@ -17,22 +17,32 @@ public class AuthController {
 
     private final JwtUtil jwtUtil;
     private final AuthConfigService authConfigService;
+    private final LoginRateLimiter loginRateLimiter;
 
-    public AuthController(JwtUtil jwtUtil, AuthConfigService authConfigService) {
+    public AuthController(JwtUtil jwtUtil,
+                          AuthConfigService authConfigService,
+                          LoginRateLimiter loginRateLimiter) {
         this.jwtUtil = jwtUtil;
         this.authConfigService = authConfigService;
+        this.loginRateLimiter = loginRateLimiter;
     }
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody Map<String, String> body) {
         if (authConfigService.isPendingRestart()) {
-            return ResponseEntity.status(423).body(Map.of("error", "配置已保存，需要重启后端服务后才能登录"));
+            return ResponseEntity.status(423).body(Map.of("error", "配置已保存，请重启后端服务后再登录"));
+        }
+        if (loginRateLimiter.isLimited()) {
+            return ResponseEntity.status(429).body(Map.of(
+                    "error", "登录尝试过于频繁，请稍后再试",
+                    "retryAfterSeconds", loginRateLimiter.retryAfterSeconds()));
         }
 
         String username = body.get("username");
         String password = body.get("password");
 
         if (authConfigService.matches(username, password)) {
+            loginRateLimiter.recordSuccess();
             String token = jwtUtil.generateToken(username);
             return ResponseEntity.ok(Map.of(
                     "token", token,
@@ -40,6 +50,7 @@ public class AuthController {
             ));
         }
 
+        loginRateLimiter.recordFailure();
         return ResponseEntity.status(401).body(Map.of("error", "用户名或密码错误"));
     }
 

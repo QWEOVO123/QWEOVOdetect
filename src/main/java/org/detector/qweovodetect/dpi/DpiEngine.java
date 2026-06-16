@@ -5,6 +5,9 @@ import org.detector.qweovodetect.stats.BlockRuleService;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 public class DpiEngine {
 
@@ -12,8 +15,25 @@ public class DpiEngine {
 
     private static final Map<Integer, TlsSniParser> tlsParsers = new ConcurrentHashMap<>();
     private static final Map<Integer, Integer> inspectedBytes = new ConcurrentHashMap<>();
+    private static final Map<Integer, Long> stateLastSeen = new ConcurrentHashMap<>();
 
     private static final int MAX_INSPECT = 8192;
+    private static final int MAX_STATE_ENTRIES = 8192;
+    private static final long STATE_TTL_MS = 180_000;
+    private static final long CLEANUP_INTERVAL_MS = 60_000;
+    private static final ScheduledExecutorService CLEANUP_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "tcp-dpi-state-cleanup");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    static {
+        CLEANUP_EXECUTOR.scheduleWithFixedDelay(
+                () -> cleanupExpired(System.currentTimeMillis()),
+                CLEANUP_INTERVAL_MS,
+                CLEANUP_INTERVAL_MS,
+                TimeUnit.MILLISECONDS);
+    }
 
     public static void inspect(ByteBuf buf,
                                String clientIp,
@@ -88,6 +108,9 @@ public class DpiEngine {
         if (dir != 0) {
             return false;
         }
+        if (!touchState(chanId)) {
+            return false;
+        }
         return inspectedBytes.getOrDefault(chanId, 0) < MAX_INSPECT;
     }
 
@@ -122,6 +145,37 @@ public class DpiEngine {
     public static void cleanup(int chanId) {
         tlsParsers.remove(chanId);
         inspectedBytes.remove(chanId);
+        stateLastSeen.remove(chanId);
         SSDetector.cleanup(chanId);
+    }
+
+    private static boolean touchState(int chanId) {
+        long now = System.currentTimeMillis();
+        if (stateLastSeen.replace(chanId, now) != null) {
+            return true;
+        }
+
+        if (stateLastSeen.size() >= MAX_STATE_ENTRIES) {
+            cleanupExpired(now);
+            if (stateLastSeen.size() >= MAX_STATE_ENTRIES) {
+                return false;
+            }
+        }
+
+        Long previous = stateLastSeen.putIfAbsent(chanId, now);
+        return previous == null || stateLastSeen.replace(chanId, previous, now);
+    }
+
+    private static void cleanupExpired(long now) {
+        stateLastSeen.entrySet().removeIf(entry -> {
+            if (now - entry.getValue() <= STATE_TTL_MS) {
+                return false;
+            }
+            int chanId = entry.getKey();
+            tlsParsers.remove(chanId);
+            inspectedBytes.remove(chanId);
+            SSDetector.cleanup(chanId);
+            return true;
+        });
     }
 }
