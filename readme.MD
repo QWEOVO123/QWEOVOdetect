@@ -1,16 +1,18 @@
 # QWEOVOdetect
 
+![QWEOVOdetect cover](docs/assets/qweovodetect-cover.png)
+
 [中文文档](README.zh-CN.md)
 
-**QWEOVOdetect** is an open-source SOCKS5 proxy auditing and abuse detection system. It passively inspects proxy traffic — extracting HTTP Host headers, TLS/QUIC SNI, detecting Shadowsocks-like encrypted tunnels, and identifying Trojan protocol signatures — then surfaces the results through a Vue 3 dashboard with management of block rules and forensic captures.
+**QWEOVOdetect** is an open-source SOCKS5 proxy auditing and abuse detection system. It passively inspects proxy traffic �?extracting HTTP Host headers, TLS/QUIC SNI, detecting Shadowsocks-like encrypted tunnels, and identifying Trojan protocol signatures �?then surfaces the results through a Vue 3 dashboard with management of block rules and forensic captures.
 
 ## Features
 
 ### SOCKS5 Proxy
 - **TCP CONNECT** forwarding with transparent relay
 - **UDP ASSOCIATE** native UDP relay with per-packet forwarding
-- **Multiple inbound ports** — each independently configured with nickname, enabled state, and optional username/password authentication
-- **Hot reload** — add, disable, or modify inbound ports and authentication without restarting the backend
+- **Multiple inbound ports** �?each independently configured with nickname, enabled state, and optional username/password authentication
+- **Hot reload** �?add, disable, or modify inbound ports and authentication without restarting the backend
 - **Proxy Protocol** support for extracting real client IP addresses
 
 ### Deep Packet Inspection (DPI)
@@ -21,12 +23,12 @@
 - **Trojan protocol** signature detection with high-risk target logging
 
 ### Blocking & Enforcement
-- **Domain keyword blocking** — blocks connections where HTTP Host, TLS SNI, or QUIC SNI matches a keyword (e.g., blocking `tiktok` matches `tiktok.com`, `api-tiktok.example`, etc.)
-- **Target IP blocking** — blocks connections destined for specific remote IP addresses
+- **Domain keyword blocking** �?blocks connections where HTTP Host, TLS SNI, or QUIC SNI matches a keyword (e.g., blocking `tiktok` matches `tiktok.com`, `api-tiktok.example`, etc.)
+- **Target IP blocking** �?blocks connections destined for specific remote IP addresses
 - TCP connections are terminated with RST where possible; QUIC matches are silently dropped
 
 ### Forensics
-- **Per-port forensic capture** — record TLS SNI, QUIC SNI, Trojan, and SS hits to timestamped `.txt` files
+- **Per-port forensic capture** �?record TLS SNI, QUIC SNI, Trojan, and SS hits to timestamped `.txt` files
 - Configurable duration with auto-stop and manual stop
 - One active forensic task per port at a time
 
@@ -49,13 +51,13 @@
 ```
  QWEOVOdetect/
  ├─ src/main/java/org/detector/qweovodetect/
- │  ├─ server/          SOCKS5 server, TCP relay, UDP relay
- │  ├─ dpi/             DPI engines: HTTP, TLS SNI, QUIC SNI, SS, Trojan
- │  ├─ stats/           REST API, statistics service, forensics, DB entities & repositories
- │  ├─ config/          Security config, JWT, database config
- │  └─ tools/           Utilities
+ �? ├─ server/          SOCKS5 server, TCP relay, UDP relay
+ �? ├─ dpi/             DPI engines: HTTP, TLS SNI, QUIC SNI, SS, Trojan
+ �? ├─ stats/           REST API, statistics service, forensics, DB entities & repositories
+ �? ├─ config/          Security config, JWT, database config
+ �? └─ tools/           Utilities
  ├─ src/main/resources/
- │  └─ application.yml  Spring Boot application configuration
+ �? └─ application.yml  Spring Boot application configuration
  ├─ qweovo-front/       Vue 3 frontend (Vite)
  ├─ data/               Default H2 database directory (runtime)
  ├─ forensics/          Forensic capture output directory (runtime)
@@ -84,7 +86,7 @@
 
 - **Java 21** or later
 - **Node.js 18+** and npm (for the frontend)
-- **MySQL** (optional — H2 is used by default)
+- **MySQL** (optional �?H2 is used by default)
 
 ### First Launch
 
@@ -122,7 +124,7 @@ On first launch, the frontend will guide you through initial configuration:
 
 | Change | Requires Restart |
 |---|---|
-| SOCKS5 inbound ports (add, disable, change port, change auth) | **No** — hot reloaded |
+| SOCKS5 inbound ports (add, disable, change port, change auth) | **No** �?hot reloaded |
 | API listen address or port | **Yes** |
 | Database type or connection settings | **Yes** |
 
@@ -137,13 +139,13 @@ A rule like `tiktok` will match any of the following in HTTP Host, TLS SNI, or Q
 - `api-tiktok.example.com`
 
 **Enforcement:**
-- HTTP Host match → TCP connection closed (RST where possible)
-- TLS SNI match → TCP connection closed (RST where possible)
-- QUIC SNI match → UDP packet silently dropped
+- HTTP Host match �?TCP connection closed (RST where possible)
+- TLS SNI match �?TCP connection closed (RST where possible)
+- QUIC SNI match �?UDP packet silently dropped
 
 ### Target IP Blocking
 
-Blocks connections where the **destination** (remote) IP matches the rule — this is not source/client IP blocking. TCP CONNECT connections are blocked after DNS resolution; UDP relay packets are dropped after the SOCKS5 UDP target address is resolved.
+Blocks connections where the **destination** (remote) IP matches the rule �?this is not source/client IP blocking. TCP CONNECT connections are blocked after DNS resolution; UDP relay packets are dropped after the SOCKS5 UDP target address is resolved.
 
 Rules are stored in the database and cached in memory to avoid per-packet database lookups.
 
