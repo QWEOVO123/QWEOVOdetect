@@ -214,3 +214,8 @@ npm run build
 ## 许可证
 
 本项目使用 **GNU Affero General Public License v3.0**，也就是 **AGPL-3.0** 开源许可证。完整内容见 [LICENSE](LICENSE)。
+
+## Acknowledgements
+
+- How the Great Firewall of China Detects and Blocks Fully Encrypted Traffic: https://www.usenix.org/system/files/usenixsecurity23-wu-mingshi.pdf
+- Trojan-Killer: [XTLS/Trojan-killer](https://github.com/XTLS/Trojan-killer)

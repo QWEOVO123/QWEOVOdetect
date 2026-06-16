@@ -213,6 +213,11 @@ npm run build
 - Do not commit runtime `cfg` files, database files, account credentials, tokens, or keys to version control.
 - The `.gitignore` excludes `cfg`, `data/`, and `forensics/` directories by default.
 
+## Acknowledgements
+
+- How the Great Firewall of China Detects and Blocks Fully Encrypted Traffic: https://www.usenix.org/system/files/usenixsecurity23-wu-mingshi.pdf
+- Trojan-Killer: [XTLS/Trojan-killer](https://github.com/XTLS/Trojan-killer)
+
 ## License
 
 This project is licensed under the **GNU Affero General Public License v3.0**. See [LICENSE](LICENSE) for the full text.
